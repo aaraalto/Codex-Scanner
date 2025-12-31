@@ -8,7 +8,7 @@
 import SwiftUI
 import AppKit
 
-/// Document preview before committing to a book
+/// Document preview with native macOS styling before committing to a book
 struct PreviewView: View {
     @ObservedObject var viewModel: ScannerViewModel
     @Binding var isPresented: Bool
@@ -48,8 +48,8 @@ struct PreviewView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Document Preview")
                     .font(.headline)
-                Text("\(viewModel.capturedPages.count) pages")
-                    .font(.caption)
+                Text("\(viewModel.capturedPages.count) \(viewModel.capturedPages.count == 1 ? "page" : "pages")")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             
@@ -63,9 +63,11 @@ struct PreviewView: View {
                     Image(systemName: "minus.magnifyingglass")
                 }
                 .buttonStyle(.borderless)
+                .disabled(zoomLevel <= 0.25)
                 
                 Text("\(Int(zoomLevel * 100))%")
-                    .font(.caption)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
                     .frame(width: 50)
                 
                 Button {
@@ -74,6 +76,10 @@ struct PreviewView: View {
                     Image(systemName: "plus.magnifyingglass")
                 }
                 .buttonStyle(.borderless)
+                .disabled(zoomLevel >= 4.0)
+                
+                Divider()
+                    .frame(height: 16)
                 
                 Button {
                     zoomLevel = 1.0
@@ -81,11 +87,19 @@ struct PreviewView: View {
                     Text("Fit")
                         .font(.caption)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+            )
             
             Button {
                 isPresented = false
@@ -95,8 +109,10 @@ struct PreviewView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Close Preview")
         }
         .padding()
+        .background(.bar)
     }
     
     // MARK: - Thumbnail Sidebar
@@ -114,11 +130,13 @@ struct PreviewView: View {
                         selectedPageIndex = index
                     }
                     .contextMenu {
-                        Button("Delete Page", role: .destructive) {
+                        Button(role: .destructive) {
                             viewModel.removePage(page)
                             if selectedPageIndex >= viewModel.capturedPages.count {
                                 selectedPageIndex = max(0, viewModel.capturedPages.count - 1)
                             }
+                        } label: {
+                            Label("Delete Page", systemImage: "trash")
                         }
                     }
                 }
@@ -148,8 +166,10 @@ struct PreviewView: View {
                             .aspectRatio(contentMode: .fit)
                             .scaleEffect(zoomLevel)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(24)
                     } else {
                         ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
                 .background(Color(nsColor: .textBackgroundColor))
@@ -162,23 +182,26 @@ struct PreviewView: View {
     private var footer: some View {
         HStack {
             // Page navigation
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     selectedPageIndex = max(0, selectedPageIndex - 1)
                 } label: {
                     Image(systemName: "chevron.left")
                 }
+                .buttonStyle(.borderless)
                 .disabled(selectedPageIndex == 0)
                 
                 Text("Page \(selectedPageIndex + 1) of \(viewModel.capturedPages.count)")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 120)
                 
                 Button {
                     selectedPageIndex = min(viewModel.capturedPages.count - 1, selectedPageIndex + 1)
                 } label: {
                     Image(systemName: "chevron.right")
                 }
+                .buttonStyle(.borderless)
                 .disabled(selectedPageIndex >= viewModel.capturedPages.count - 1)
             }
             .disabled(viewModel.capturedPages.isEmpty)
@@ -187,9 +210,11 @@ struct PreviewView: View {
             
             // Actions
             HStack(spacing: 12) {
-                Button("Clear All", role: .destructive) {
+                Button(role: .destructive) {
                     viewModel.clearAllPages()
                     isPresented = false
+                } label: {
+                    Text("Clear All")
                 }
                 .disabled(viewModel.capturedPages.isEmpty)
                 
@@ -200,6 +225,7 @@ struct PreviewView: View {
             }
         }
         .padding()
+        .background(.bar)
     }
 }
 

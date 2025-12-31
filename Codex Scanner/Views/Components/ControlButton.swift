@@ -7,7 +7,8 @@
 
 import SwiftUI
 
-/// A reusable control button with icon, label, and active state styling
+/// A reusable control button with native macOS styling
+/// Features icon, label, and active state indication
 struct ControlButton: View {
     let icon: String
     let label: String
@@ -15,34 +16,40 @@ struct ControlButton: View {
     let color: Color
     let action: () -> Void
     
+    @State private var isHovered = false
+    
     var body: some View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 18))
+                    .font(.system(size: 16, weight: .medium))
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
             }
-            .foregroundStyle(isActive ? color : .white.opacity(0.5))
-            .frame(width: 52, height: 52)
+            .foregroundStyle(isActive ? color : (isHovered ? .primary : .secondary))
+            .frame(width: 56, height: 56)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isActive ? color.opacity(0.2) : .white.opacity(0.05))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isActive ? color.opacity(0.12) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isActive ? color.opacity(0.5) : .clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isActive ? color.opacity(0.3) : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
 #Preview {
-    HStack {
+    HStack(spacing: 12) {
         ControlButton(icon: "play.fill", label: "Play", isActive: true, color: .green) {}
         ControlButton(icon: "pause.fill", label: "Pause", isActive: false, color: .orange) {}
     }
-    .padding()
-    .background(Color.black)
+    .padding(20)
 }

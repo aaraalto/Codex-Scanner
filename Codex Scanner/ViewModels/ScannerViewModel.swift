@@ -17,9 +17,11 @@ final class ScannerViewModel: ObservableObject {
     
     // MARK: - Published Properties
     
-    @Published var scanningState: ScanningState = .stopped
+    @Published var scanningState: ScanningState = .paused  // Start paused - press record to scan
     @Published var isAutoScanEnabled = true
     @Published var currentBounds: ImageProcessor.DocumentBounds?
+    @Published var smoothedBounds: ImageProcessor.DocumentBounds?  // Smoothed for display
+    @Published var manualBoundsAdjustment: ImageProcessor.DocumentBounds?  // User adjustments
     @Published var capturedPages: [CapturedPage] = []
     @Published var selectedPreset: ImageProcessor.FilterPreset = .original
     @Published var isProcessing = false
@@ -27,6 +29,8 @@ final class ScannerViewModel: ObservableObject {
     @Published var stabilityProgress: Double = 0  // 0 to 1 for visual feedback
     @Published var showCaptureSuccess = false  // Triggers success animation
     @Published var lastCapturedPageId: UUID?  // For highlighting newly added page
+    @Published var isCameraReady = false  // Camera initialized but not scanning
+    @Published var isOnCooldown = false  // Prevents rapid captures
     
     // MARK: - Services
     
@@ -38,8 +42,17 @@ final class ScannerViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var lastBoundsUpdate = Date()
     private var stableFrameCount = 0
-    private let stabilityThreshold = 15  // Number of stable frames before auto-capture
-    private let boundsMovementThreshold: CGFloat = 0.02  // Max movement to consider stable
+    private let stabilityThreshold = 25  // Increased for more delay before auto-capture
+    private let boundsMovementThreshold: CGFloat = 0.015  // Tighter threshold for stability
+    private let cooldownDuration: TimeInterval = 3.0  // Seconds between captures
+    private let smoothingFactor: CGFloat = 0.15  // Lower = smoother (more lag), Higher = more responsive
+    
+    // MARK: - Computed Properties
+    
+    /// The bounds to display - either manual adjustment or smoothed detection
+    var displayBounds: ImageProcessor.DocumentBounds? {
+        manualBoundsAdjustment ?? smoothedBounds
+    }
     
     // MARK: - Initialization
     
@@ -49,9 +62,19 @@ final class ScannerViewModel: ObservableObject {
     
     // MARK: - Public Methods
     
-    /// Start the scanning session
-    func startScanning() async {
+    /// Initialize camera but don't start scanning
+    func initializeCamera() async {
         await cameraManager.startSession()
+        isCameraReady = true
+        // Stay paused - user must press record to start
+    }
+    
+    /// Start the scanning session (called when record is pressed)
+    func startScanning() async {
+        if !isCameraReady {
+            await cameraManager.startSession()
+            isCameraReady = true
+        }
         scanningState = .scanning
     }
     
@@ -59,6 +82,7 @@ final class ScannerViewModel: ObservableObject {
     func stopScanning() {
         cameraManager.stopSession()
         scanningState = .stopped
+        isCameraReady = false
         stableFrameCount = 0
         stabilityProgress = 0
     }
@@ -79,15 +103,49 @@ final class ScannerViewModel: ObservableObject {
     func togglePlayPause() {
         if scanningState == .scanning {
             pauseScanning()
-        } else if scanningState == .paused {
-            resumeScanning()
+        } else if scanningState == .paused || scanningState == .stopped {
+            Task { await startScanning() }
         }
     }
     
     /// Manually trigger a photo capture
     func capturePhoto() {
-        guard scanningState != .stopped else { return }
+        guard scanningState != .stopped, !isOnCooldown else { return }
         cameraManager.capturePhoto()
+    }
+    
+    /// Update a corner of the bounds manually
+    func updateCorner(_ corner: Corner, to normalizedPoint: CGPoint) {
+        var bounds = manualBoundsAdjustment ?? smoothedBounds ?? ImageProcessor.DocumentBounds(
+            topLeft: CGPoint(x: 0.1, y: 0.9),
+            topRight: CGPoint(x: 0.9, y: 0.9),
+            bottomLeft: CGPoint(x: 0.1, y: 0.1),
+            bottomRight: CGPoint(x: 0.9, y: 0.1)
+        )
+        
+        // Clamp to valid range
+        let clampedPoint = CGPoint(
+            x: max(0.02, min(0.98, normalizedPoint.x)),
+            y: max(0.02, min(0.98, normalizedPoint.y))
+        )
+        
+        switch corner {
+        case .topLeft: bounds.topLeft = clampedPoint
+        case .topRight: bounds.topRight = clampedPoint
+        case .bottomLeft: bounds.bottomLeft = clampedPoint
+        case .bottomRight: bounds.bottomRight = clampedPoint
+        }
+        
+        manualBoundsAdjustment = bounds
+    }
+    
+    /// Clear manual bounds adjustment
+    func resetManualBounds() {
+        manualBoundsAdjustment = nil
+    }
+    
+    enum Corner {
+        case topLeft, topRight, bottomLeft, bottomRight
     }
     
     /// Remove a captured page
@@ -179,7 +237,7 @@ final class ScannerViewModel: ObservableObject {
         
         // Process video frames for document detection
         cameraManager.framePublisher
-            .throttle(for: .milliseconds(100), scheduler: DispatchQueue.global(qos: .userInteractive), latest: true)
+            .throttle(for: .milliseconds(80), scheduler: DispatchQueue.global(qos: .userInteractive), latest: true)
             .sink { [weak self] pixelBuffer in
                 guard let self = self else { return }
                 let imageProcessor = self.imageProcessor
@@ -203,10 +261,28 @@ final class ScannerViewModel: ObservableObject {
     }
     
     private func handleDetectedBounds(_ bounds: ImageProcessor.DocumentBounds?) {
-        // Only process if actively scanning
-        guard scanningState == .scanning else {
-            currentBounds = bounds
-            stabilityProgress = 0
+        // Update raw bounds
+        currentBounds = bounds
+        
+        // Apply smoothing for display (interpolate towards new bounds)
+        if let newBounds = bounds {
+            if let current = smoothedBounds {
+                smoothedBounds = ImageProcessor.DocumentBounds(
+                    topLeft: interpolate(from: current.topLeft, to: newBounds.topLeft, factor: smoothingFactor),
+                    topRight: interpolate(from: current.topRight, to: newBounds.topRight, factor: smoothingFactor),
+                    bottomLeft: interpolate(from: current.bottomLeft, to: newBounds.bottomLeft, factor: smoothingFactor),
+                    bottomRight: interpolate(from: current.bottomRight, to: newBounds.bottomRight, factor: smoothingFactor)
+                )
+            } else {
+                smoothedBounds = newBounds
+            }
+        }
+        
+        // Only process stability if actively scanning and not on cooldown
+        guard scanningState == .scanning, !isOnCooldown else {
+            if scanningState != .scanning {
+                stabilityProgress = 0
+            }
             return
         }
         
@@ -224,15 +300,20 @@ final class ScannerViewModel: ObservableObject {
                     capturePhoto()
                 }
             } else {
-                stableFrameCount = 0
-                stabilityProgress = 0
+                stableFrameCount = max(0, stableFrameCount - 2)  // Decay more slowly
+                stabilityProgress = min(1.0, Double(stableFrameCount) / Double(stabilityThreshold))
             }
         } else {
             stableFrameCount = 0
             stabilityProgress = 0
         }
-        
-        currentBounds = bounds
+    }
+    
+    private func interpolate(from: CGPoint, to: CGPoint, factor: CGFloat) -> CGPoint {
+        CGPoint(
+            x: from.x + (to.x - from.x) * factor,
+            y: from.y + (to.y - from.y) * factor
+        )
     }
     
     private func maxMovement(from old: ImageProcessor.DocumentBounds, to new: ImageProcessor.DocumentBounds) -> CGFloat {
@@ -251,13 +332,22 @@ final class ScannerViewModel: ObservableObject {
     
     private func processPhoto(_ ciImage: CIImage) async {
         isProcessing = true
+        
+        // Start cooldown
+        isOnCooldown = true
+        
         defer { isProcessing = false }
         
         // Apply orientation correction from EXIF
         let orientedImage = correctOrientation(ciImage)
         
-        // Detect bounds in high-res image
-        let bounds = await imageProcessor.detectDocument(in: orientedImage)
+        // Use manual bounds if available, otherwise detect
+        let bounds: ImageProcessor.DocumentBounds?
+        if let manual = manualBoundsAdjustment {
+            bounds = manual
+        } else {
+            bounds = await imageProcessor.detectDocument(in: orientedImage)
+        }
         
         // Process the image
         let processed = imageProcessor.process(
@@ -284,6 +374,9 @@ final class ScannerViewModel: ObservableObject {
             lastCapturedPageId = page.id
         }
         
+        // Clear manual bounds after capture
+        manualBoundsAdjustment = nil
+        
         // Show capture success overlay
         showCaptureSuccess = true
         
@@ -291,14 +384,18 @@ final class ScannerViewModel: ObservableObject {
         playSuccessSound()
         
         // Hide success message after delay
-        try? await Task.sleep(for: .seconds(2.5))
+        try? await Task.sleep(for: .seconds(2.0))
         
         withAnimation(.easeOut(duration: 0.3)) {
             showCaptureSuccess = false
         }
         
+        // End cooldown after delay
+        try? await Task.sleep(for: .seconds(cooldownDuration - 2.0))
+        isOnCooldown = false
+        
         // Clear the highlight after a bit longer
-        try? await Task.sleep(for: .seconds(1))
+        try? await Task.sleep(for: .seconds(0.5))
         lastCapturedPageId = nil
     }
     

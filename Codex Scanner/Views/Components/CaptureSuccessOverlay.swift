@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// Animated overlay shown after successful page capture
+/// Animated overlay shown after successful page capture with native macOS styling
 struct CaptureSuccessOverlay: View {
     let pageNumber: Int
     @State private var showCheckmark = false
@@ -18,54 +18,49 @@ struct CaptureSuccessOverlay: View {
             // Success checkmark with animation
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "10B981"), Color(hex: "059669")],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-                    .shadow(color: Color(hex: "10B981").opacity(0.5), radius: 20)
+                    .fill(Color.green.gradient)
+                    .frame(width: 72, height: 72)
+                    .shadow(color: Color.green.opacity(0.4), radius: 16)
                     .scaleEffect(showCheckmark ? 1 : 0.5)
                     .opacity(showCheckmark ? 1 : 0)
                 
                 Image(systemName: "checkmark")
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .scaleEffect(showCheckmark ? 1 : 0)
             }
             
-            VStack(spacing: 8) {
-                Text("Page \(pageNumber) Captured!")
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
+            VStack(spacing: 10) {
+                Text("Page \(pageNumber) Captured")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.primary)
                 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.turn.up.right")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                     Text("Turn the page")
                         .font(.system(.subheadline, design: .rounded, weight: .medium))
                 }
-                .foregroundStyle(.white.opacity(0.8))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.15), in: Capsule())
+                .foregroundStyle(.secondary)
             }
             .opacity(showText ? 1 : 0)
-            .offset(y: showText ? 0 : 10)
+            .offset(y: showText ? 0 : 8)
         }
-        .padding(40)
+        .padding(32)
         .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.ultraThinMaterial.opacity(0.95))
-                .shadow(color: .black.opacity(0.3), radius: 30)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.15), radius: 24, y: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
         )
         .onAppear {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
                 showCheckmark = true
             }
-            withAnimation(.easeOut(duration: 0.4).delay(0.2)) {
+            withAnimation(.easeOut(duration: 0.35).delay(0.15)) {
                 showText = true
             }
         }
@@ -75,5 +70,5 @@ struct CaptureSuccessOverlay: View {
 #Preview {
     CaptureSuccessOverlay(pageNumber: 3)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.5))
+        .background(Color(nsColor: .windowBackgroundColor))
 }

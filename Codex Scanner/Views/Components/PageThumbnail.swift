@@ -7,10 +7,12 @@
 
 import SwiftUI
 
-/// Thumbnail view for displaying a page in the library grid
+/// Thumbnail view for displaying a page in the library grid with native macOS styling
 struct PageThumbnail: View {
     let page: Page
     let isSelected: Bool
+    
+    @State private var isHovered = false
     
     var body: some View {
         VStack(spacing: 8) {
@@ -19,17 +21,16 @@ struct PageThumbnail: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(height: 180)
-                    .cornerRadius(8)
-                    .shadow(radius: isSelected ? 4 : 2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .shadow(color: .black.opacity(isHovered ? 0.15 : 0.08), radius: isHovered ? 8 : 4, y: 2)
             } else {
-                Rectangle()
-                    .fill(.quaternary)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
                     .frame(height: 180)
-                    .cornerRadius(8)
                     .overlay {
                         Image(systemName: "photo")
-                            .font(.largeTitle)
-                            .foregroundStyle(.tertiary)
+                            .font(.title)
+                            .foregroundStyle(.quaternary)
                     }
             }
             
@@ -37,14 +38,20 @@ struct PageThumbnail: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(8)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.1) : (isHovered ? Color.primary.opacity(0.03) : Color.clear))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 2)
         )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .contentShape(Rectangle())
     }
 }

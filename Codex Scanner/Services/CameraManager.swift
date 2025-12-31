@@ -19,6 +19,7 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentDevice: AVCaptureDevice?
     @Published private(set) var availableDevices: [AVCaptureDevice] = []
     @Published private(set) var error: CameraError?
+    @Published var zoomFactor: CGFloat = 2.0  // Default to 2x zoom
     
     // MARK: - Public Properties
     
@@ -144,6 +145,15 @@ final class CameraManager: NSObject, ObservableObject {
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
     
+    /// Set the camera zoom factor
+    /// Note: Video zoom is not available on macOS - this is a no-op placeholder
+    func setZoom(_ factor: CGFloat) {
+        // Video zoom factor is not available on macOS
+        // On iOS, you would use device.videoZoomFactor
+        // For macOS, we just store the requested value but can't apply it
+        zoomFactor = factor
+    }
+    
     // MARK: - Private Methods
     
     private func setupDeviceDiscovery() {
@@ -227,6 +237,9 @@ final class CameraManager: NSObject, ObservableObject {
         if session.canSetSessionPreset(.photo) {
             session.sessionPreset = .photo
         }
+        
+        // Apply default zoom factor
+        setZoom(zoomFactor)
     }
 }
 

@@ -10,7 +10,7 @@ import SwiftData
 import AppKit
 import UniformTypeIdentifiers
 
-/// View displaying saved books and their pages
+/// View displaying saved books and their pages with native macOS styling
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
@@ -25,16 +25,16 @@ struct LibraryView: View {
     var body: some View {
         NavigationSplitView {
             booksList
-                .navigationSplitViewColumnWidth(min: 200, ideal: 250)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } content: {
             if let book = selectedBook {
                 pagesGrid(for: book)
                     .navigationSplitViewColumnWidth(min: 300, ideal: 400)
             } else {
                 ContentUnavailableView(
-                    "No Book Selected",
+                    "Select a Book",
                     systemImage: "book.closed",
-                    description: Text("Select a book from the sidebar")
+                    description: Text("Choose a book from the sidebar to view its pages")
                 )
             }
         } detail: {
@@ -42,9 +42,9 @@ struct LibraryView: View {
                 EditorView(page: page)
             } else {
                 ContentUnavailableView(
-                    "No Page Selected",
+                    "Select a Page",
                     systemImage: "doc.text.image",
-                    description: Text("Select a page to view")
+                    description: Text("Choose a page to view and edit")
                 )
             }
         }
@@ -57,44 +57,59 @@ struct LibraryView: View {
     
     private var booksList: some View {
         List(selection: $selectedBook) {
-            ForEach(books) { book in
-                NavigationLink(value: book) {
-                    HStack {
-                        Image(systemName: "book.closed.fill")
-                            .foregroundStyle(.secondary)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(book.title)
-                                .lineLimit(1)
-                            
-                            Text("\(book.pageCount) pages")
-                                .font(.caption)
+            Section {
+                ForEach(books) { book in
+                    NavigationLink(value: book) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "book.closed.fill")
+                                .font(.system(size: 20))
                                 .foregroundStyle(.secondary)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(book.title)
+                                    .lineLimit(1)
+                                    .font(.system(.body, weight: .medium))
+                                
+                                Text("\(book.pageCount) \(book.pageCount == 1 ? "page" : "pages")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .contextMenu {
+                        Button {
+                            selectedBook = book
+                            newTitle = book.title
+                            showingRenameSheet = true
+                        } label: {
+                            Label("Rename...", systemImage: "pencil")
+                        }
+                        
+                        Button {
+                            selectedBook = book
+                            exportPDF(book: book)
+                        } label: {
+                            Label("Export as PDF...", systemImage: "square.and.arrow.up")
+                        }
+                        
+                        Divider()
+                        
+                        Button(role: .destructive) {
+                            deleteBook(book)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
                     }
-                    .padding(.vertical, 4)
                 }
-                .contextMenu {
-                    Button("Rename...") {
-                        selectedBook = book
-                        newTitle = book.title
-                        showingRenameSheet = true
-                    }
-                    
-                    Button("Export PDF...") {
-                        selectedBook = book
-                        exportPDF(book: book)
-                    }
-                    
-                    Divider()
-                    
-                    Button("Delete", role: .destructive) {
-                        deleteBook(book)
-                    }
-                }
+                .onDelete(perform: deleteBooks)
+            } header: {
+                Text("Books")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .onDelete(perform: deleteBooks)
         }
+        .listStyle(.sidebar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -102,6 +117,7 @@ struct LibraryView: View {
                 } label: {
                     Label("New Book", systemImage: "plus")
                 }
+                .help("Create New Book")
             }
         }
         .navigationTitle("Library")
@@ -113,33 +129,52 @@ struct LibraryView: View {
         VStack(spacing: 0) {
             // Header with actions
             HStack {
-                Text(book.title)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(book.title)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    
+                    Text("\(book.pageCount) \(book.pageCount == 1 ? "page" : "pages")")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 
                 Spacer()
                 
-                Button {
-                    exportPDF(book: book)
-                } label: {
-                    Label("Export PDF", systemImage: "square.and.arrow.up")
+                HStack(spacing: 12) {
+                    Button {
+                        newTitle = book.title
+                        showingRenameSheet = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    
+                    Button {
+                        exportPDF(book: book)
+                    } label: {
+                        Label("Export PDF", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(book.pages.isEmpty)
                 }
-                .disabled(book.pages.isEmpty)
             }
             .padding()
+            .background(.bar)
             
             Divider()
             
             if book.pages.isEmpty {
                 ContentUnavailableView(
-                    "No Pages",
+                    "No Pages Yet",
                     systemImage: "doc.text.image",
-                    description: Text("Add pages by scanning")
+                    description: Text("Start scanning to add pages to this book")
                 )
             } else {
                 ScrollView {
                     LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 150, maximum: 200))],
-                        spacing: 16
+                        columns: [GridItem(.adaptive(minimum: 140, maximum: 180))],
+                        spacing: 20
                     ) {
                         ForEach(book.sortedPages) { page in
                             PageThumbnail(page: page, isSelected: selectedPage?.id == page.id)
@@ -147,13 +182,15 @@ struct LibraryView: View {
                                     selectedPage = page
                                 }
                                 .contextMenu {
-                                    Button("Delete", role: .destructive) {
+                                    Button(role: .destructive) {
                                         deletePage(page, from: book)
+                                    } label: {
+                                        Label("Delete Page", systemImage: "trash")
                                     }
                                 }
                         }
                     }
-                    .padding()
+                    .padding(20)
                 }
             }
         }
@@ -162,14 +199,22 @@ struct LibraryView: View {
     // MARK: - Rename Sheet
     
     private var renameSheet: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 24) {
             Text("Rename Book")
                 .font(.headline)
             
             TextField("Title", text: $newTitle)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .padding(10)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                )
             
-            HStack {
+            HStack(spacing: 12) {
                 Button("Cancel") {
                     showingRenameSheet = false
                 }
@@ -183,12 +228,13 @@ struct LibraryView: View {
                     }
                     showingRenameSheet = false
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(newTitle.isEmpty)
             }
         }
-        .padding()
-        .frame(width: 300)
+        .padding(28)
+        .frame(width: 340)
     }
     
     // MARK: - Actions

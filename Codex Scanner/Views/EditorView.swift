@@ -8,7 +8,7 @@
 import SwiftUI
 import AppKit
 
-/// View for editing individual scanned pages
+/// View for editing individual scanned pages with native macOS styling
 struct EditorView: View {
     let page: Page
     @State private var currentPreset: ImageProcessor.FilterPreset = .original
@@ -39,11 +39,14 @@ struct EditorView: View {
     private var imageSection: some View {
         Group {
             if let image = processedImage {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .rotationEffect(.degrees(rotation))
-                    .padding()
+                ScrollView([.horizontal, .vertical]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .rotationEffect(.degrees(rotation))
+                        .padding(32)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ContentUnavailableView(
                     "No Image",
@@ -53,7 +56,7 @@ struct EditorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: .textBackgroundColor))
     }
     
     // MARK: - Controls Section
@@ -61,47 +64,62 @@ struct EditorView: View {
     private var controlSection: some View {
         HStack(spacing: 24) {
             // Rotation controls
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Button {
-                    withAnimation { rotation -= 90 }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        rotation -= 90
+                    }
                 } label: {
-                    Image(systemName: "rotate.left")
+                    Label("Rotate Left", systemImage: "rotate.left")
                 }
+                .buttonStyle(.borderless)
                 .help("Rotate left 90°")
                 
                 Button {
-                    withAnimation { rotation += 90 }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        rotation += 90
+                    }
                 } label: {
-                    Image(systemName: "rotate.right")
+                    Label("Rotate Right", systemImage: "rotate.right")
                 }
+                .buttonStyle(.borderless)
                 .help("Rotate right 90°")
             }
             
             Divider()
-                .frame(height: 24)
+                .frame(height: 20)
             
             // Filter presets
-            Picker("Filter", selection: $currentPreset) {
-                ForEach(ImageProcessor.FilterPreset.allCases) { preset in
-                    Text(preset.rawValue).tag(preset)
+            HStack(spacing: 12) {
+                Text("Filter:")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                
+                Picker("Filter", selection: $currentPreset) {
+                    ForEach(ImageProcessor.FilterPreset.allCases) { preset in
+                        Text(preset.rawValue).tag(preset)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 300)
-            .onChange(of: currentPreset) { _, newValue in
-                applyPreset(newValue)
+                .pickerStyle(.segmented)
+                .frame(width: 280)
+                .labelsHidden()
+                .onChange(of: currentPreset) { _, newValue in
+                    applyPreset(newValue)
+                }
             }
             
             Spacer()
             
-            // Close button
+            // Done button
             Button("Done") {
                 dismiss()
             }
+            .buttonStyle(.borderedProminent)
             .keyboardShortcut(.return, modifiers: .command)
         }
-        .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(.bar)
     }
     
     // MARK: - Actions
