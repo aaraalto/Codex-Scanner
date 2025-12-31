@@ -11,29 +11,6 @@ import Combine
 import CoreImage
 import AppKit
 
-/// Scanning session state
-enum ScanningState: String, CaseIterable {
-    case stopped = "Stopped"
-    case scanning = "Scanning"
-    case paused = "Paused"
-    
-    var icon: String {
-        switch self {
-        case .stopped: return "stop.fill"
-        case .scanning: return "play.fill"
-        case .paused: return "pause.fill"
-        }
-    }
-    
-    var color: Color {
-        switch self {
-        case .stopped: return .secondary
-        case .scanning: return .green
-        case .paused: return .orange
-        }
-    }
-}
-
 /// Main view model coordinating camera, processing, and page management
 @MainActor
 final class ScannerViewModel: ObservableObject {
@@ -63,25 +40,6 @@ final class ScannerViewModel: ObservableObject {
     private var stableFrameCount = 0
     private let stabilityThreshold = 15  // Number of stable frames before auto-capture
     private let boundsMovementThreshold: CGFloat = 0.02  // Max movement to consider stable
-    
-    // MARK: - Types
-    
-    struct CapturedPage: Identifiable {
-        let id = UUID()
-        let originalImage: CIImage
-        var processedImage: CIImage
-        var bounds: ImageProcessor.DocumentBounds?
-        var preset: ImageProcessor.FilterPreset
-        var thumbnail: NSImage?
-        
-        var displayImage: NSImage? {
-            let context = CIContext()
-            guard let cgImage = context.createCGImage(processedImage, from: processedImage.extent) else {
-                return nil
-            }
-            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        }
-    }
     
     // MARK: - Initialization
     
@@ -352,30 +310,5 @@ final class ScannerViewModel: ObservableObject {
             // Fallback to system beep
             NSSound.beep()
         }
-    }
-}
-
-// MARK: - NSImage Extension
-
-extension NSImage {
-    func resized(to targetSize: NSSize) -> NSImage {
-        let aspectRatio = size.width / size.height
-        var newSize = targetSize
-        
-        if aspectRatio > 1 {
-            newSize.height = targetSize.width / aspectRatio
-        } else {
-            newSize.width = targetSize.height * aspectRatio
-        }
-        
-        let newImage = NSImage(size: newSize)
-        newImage.lockFocus()
-        draw(in: NSRect(origin: .zero, size: newSize),
-             from: NSRect(origin: .zero, size: size),
-             operation: .copy,
-             fraction: 1.0)
-        newImage.unlockFocus()
-        
-        return newImage
     }
 }
