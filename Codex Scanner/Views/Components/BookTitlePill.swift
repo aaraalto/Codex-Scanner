@@ -7,8 +7,8 @@
 
 import SwiftUI
 
-/// Displays the current book title with native macOS styling
-/// Clickable to edit the title
+/// Displays the current book title with macOS Tahoe styling
+/// Clickable to edit the title - bigger, more prominent design
 struct BookTitlePill: View {
     let title: String
     let onTap: (() -> Void)?
@@ -24,31 +24,41 @@ struct BookTitlePill: View {
         Button {
             onTap?()
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "book.closed")
-                    .font(.system(size: 14, weight: .medium))
+            HStack(spacing: 12) {
+                Image(systemName: "book.closed.fill")
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.secondary)
                 
                 Text(title)
-                    .font(.system(.body, design: .default, weight: .medium))
+                    .font(.system(.body, design: .rounded, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 
                 if onTap != nil {
                     Image(systemName: "pencil")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.regularMaterial.opacity(isHovered ? 1 : 0.8))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(isHovered ? 0.25 : 0.15),
+                                Color.white.opacity(isHovered ? 0.1 : 0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -62,11 +72,12 @@ struct BookTitlePill: View {
 }
 
 #Preview {
-    VStack(spacing: 20) {
+    VStack(spacing: 24) {
         BookTitlePill(title: "The Great Gatsby")
         BookTitlePill(title: "Untitled Book") {
             print("Tapped")
         }
     }
-    .padding(20)
+    .padding(40)
+    .background(Color(nsColor: .windowBackgroundColor))
 }

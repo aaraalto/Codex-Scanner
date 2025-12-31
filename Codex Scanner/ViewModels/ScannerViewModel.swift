@@ -11,6 +11,21 @@ import Combine
 import CoreImage
 import AppKit
 
+/// Orientation preset for scanning
+enum ScanOrientation: String, CaseIterable {
+    case auto = "Auto"
+    case landscape = "Landscape"
+    case portrait = "Portrait"
+    
+    var icon: String {
+        switch self {
+        case .auto: return "rectangle.on.rectangle.angled"
+        case .landscape: return "rectangle.landscape.rotate"
+        case .portrait: return "rectangle.portrait.rotate"
+        }
+    }
+}
+
 /// Main view model coordinating camera, processing, and page management
 @MainActor
 final class ScannerViewModel: ObservableObject {
@@ -32,6 +47,11 @@ final class ScannerViewModel: ObservableObject {
     @Published var isCameraReady = false  // Camera initialized but not scanning
     @Published var isOnCooldown = false  // Prevents rapid captures
     
+    // Book scanning features
+    @Published var isBoundsLocked = false  // Lock the scanning area
+    @Published var lockedBounds: ImageProcessor.DocumentBounds?  // The locked bounds
+    @Published var scanOrientation: ScanOrientation = .landscape  // Default to landscape for books
+    
     // MARK: - Services
     
     let cameraManager = CameraManager()
@@ -49,9 +69,20 @@ final class ScannerViewModel: ObservableObject {
     
     // MARK: - Computed Properties
     
-    /// The bounds to display - either manual adjustment or smoothed detection
+    /// The bounds to display - prioritizes locked > manual > smoothed
     var displayBounds: ImageProcessor.DocumentBounds? {
-        manualBoundsAdjustment ?? smoothedBounds
+        if isBoundsLocked, let locked = lockedBounds {
+            return locked
+        }
+        return manualBoundsAdjustment ?? smoothedBounds
+    }
+    
+    /// The bounds to use for capture - prioritizes locked > manual > detected
+    var captureBounds: ImageProcessor.DocumentBounds? {
+        if isBoundsLocked, let locked = lockedBounds {
+            return locked
+        }
+        return manualBoundsAdjustment ?? currentBounds
     }
     
     // MARK: - Initialization
@@ -114,14 +145,80 @@ final class ScannerViewModel: ObservableObject {
         cameraManager.capturePhoto()
     }
     
+    /// Lock the current bounds
+    func lockBounds() {
+        // Use current display bounds or create default landscape bounds
+        if let bounds = displayBounds {
+            lockedBounds = bounds
+        } else {
+            // Default landscape bounds (wider than tall)
+            lockedBounds = createDefaultBounds(for: scanOrientation)
+        }
+        isBoundsLocked = true
+    }
+    
+    /// Unlock bounds and resume detection
+    func unlockBounds() {
+        isBoundsLocked = false
+        // Keep lockedBounds for potential re-lock
+    }
+    
+    /// Toggle bounds lock
+    func toggleBoundsLock() {
+        if isBoundsLocked {
+            unlockBounds()
+        } else {
+            lockBounds()
+        }
+    }
+    
+    /// Set scan orientation and optionally apply default bounds
+    func setScanOrientation(_ orientation: ScanOrientation) {
+        scanOrientation = orientation
+        
+        // If bounds are locked, update them to match new orientation
+        if isBoundsLocked {
+            lockedBounds = createDefaultBounds(for: orientation)
+        }
+    }
+    
+    /// Create default bounds for the given orientation
+    func createDefaultBounds(for orientation: ScanOrientation) -> ImageProcessor.DocumentBounds {
+        switch orientation {
+        case .landscape:
+            // Landscape: wider than tall (good for open books)
+            return ImageProcessor.DocumentBounds(
+                topLeft: CGPoint(x: 0.05, y: 0.85),
+                topRight: CGPoint(x: 0.95, y: 0.85),
+                bottomLeft: CGPoint(x: 0.05, y: 0.15),
+                bottomRight: CGPoint(x: 0.95, y: 0.15),
+                confidence: 1.0
+            )
+        case .portrait:
+            // Portrait: taller than wide (single page)
+            return ImageProcessor.DocumentBounds(
+                topLeft: CGPoint(x: 0.15, y: 0.95),
+                topRight: CGPoint(x: 0.85, y: 0.95),
+                bottomLeft: CGPoint(x: 0.15, y: 0.05),
+                bottomRight: CGPoint(x: 0.85, y: 0.05),
+                confidence: 1.0
+            )
+        case .auto:
+            // Auto: slightly larger area, let detection handle it
+            return ImageProcessor.DocumentBounds(
+                topLeft: CGPoint(x: 0.08, y: 0.92),
+                topRight: CGPoint(x: 0.92, y: 0.92),
+                bottomLeft: CGPoint(x: 0.08, y: 0.08),
+                bottomRight: CGPoint(x: 0.92, y: 0.08),
+                confidence: 1.0
+            )
+        }
+    }
+    
     /// Update a corner of the bounds manually
     func updateCorner(_ corner: Corner, to normalizedPoint: CGPoint) {
-        var bounds = manualBoundsAdjustment ?? smoothedBounds ?? ImageProcessor.DocumentBounds(
-            topLeft: CGPoint(x: 0.1, y: 0.9),
-            topRight: CGPoint(x: 0.9, y: 0.9),
-            bottomLeft: CGPoint(x: 0.1, y: 0.1),
-            bottomRight: CGPoint(x: 0.9, y: 0.1)
-        )
+        // If bounds are locked, update the locked bounds
+        let currentBounds = lockedBounds ?? manualBoundsAdjustment ?? smoothedBounds ?? createDefaultBounds(for: scanOrientation)
         
         // Clamp to valid range
         let clampedPoint = CGPoint(
@@ -129,19 +226,58 @@ final class ScannerViewModel: ObservableObject {
             y: max(0.02, min(0.98, normalizedPoint.y))
         )
         
+        // Create new bounds with the updated corner
+        let newBounds: ImageProcessor.DocumentBounds
         switch corner {
-        case .topLeft: bounds.topLeft = clampedPoint
-        case .topRight: bounds.topRight = clampedPoint
-        case .bottomLeft: bounds.bottomLeft = clampedPoint
-        case .bottomRight: bounds.bottomRight = clampedPoint
+        case .topLeft:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: clampedPoint,
+                topRight: currentBounds.topRight,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .topRight:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: clampedPoint,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .bottomLeft:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: currentBounds.topRight,
+                bottomLeft: clampedPoint,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .bottomRight:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: currentBounds.topRight,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: clampedPoint,
+                confidence: currentBounds.confidence
+            )
         }
         
-        manualBoundsAdjustment = bounds
+        // Apply to the appropriate bounds
+        if isBoundsLocked {
+            lockedBounds = newBounds
+        } else {
+            manualBoundsAdjustment = newBounds
+        }
     }
     
     /// Clear manual bounds adjustment
     func resetManualBounds() {
         manualBoundsAdjustment = nil
+        if isBoundsLocked {
+            // Reset locked bounds to default for current orientation
+            lockedBounds = createDefaultBounds(for: scanOrientation)
+        }
     }
     
     enum Corner {
@@ -240,11 +376,19 @@ final class ScannerViewModel: ObservableObject {
             .throttle(for: .milliseconds(80), scheduler: DispatchQueue.global(qos: .userInteractive), latest: true)
             .sink { [weak self] pixelBuffer in
                 guard let self = self else { return }
-                let imageProcessor = self.imageProcessor
-                // Detect synchronously on background queue, then update UI
-                let bounds = imageProcessor.detectDocument(in: pixelBuffer)
+                
+                // Skip detection if bounds are locked
                 Task { @MainActor [weak self] in
-                    self?.handleDetectedBounds(bounds)
+                    guard let self = self, !self.isBoundsLocked else { return }
+                    
+                    let imageProcessor = self.imageProcessor
+                    
+                    // Run detection on background
+                    let bounds = await Task.detached {
+                        imageProcessor.detectDocument(in: pixelBuffer)
+                    }.value
+                    
+                    self.handleDetectedBounds(bounds)
                 }
             }
             .store(in: &cancellables)
@@ -261,17 +405,24 @@ final class ScannerViewModel: ObservableObject {
     }
     
     private func handleDetectedBounds(_ bounds: ImageProcessor.DocumentBounds?) {
+        // Skip if bounds are locked
+        guard !isBoundsLocked else { return }
+        
         // Update raw bounds
         currentBounds = bounds
         
+        // Apply orientation filtering if not auto
+        let filteredBounds = filterBoundsByOrientation(bounds)
+        
         // Apply smoothing for display (interpolate towards new bounds)
-        if let newBounds = bounds {
+        if let newBounds = filteredBounds {
             if let current = smoothedBounds {
                 smoothedBounds = ImageProcessor.DocumentBounds(
                     topLeft: interpolate(from: current.topLeft, to: newBounds.topLeft, factor: smoothingFactor),
                     topRight: interpolate(from: current.topRight, to: newBounds.topRight, factor: smoothingFactor),
                     bottomLeft: interpolate(from: current.bottomLeft, to: newBounds.bottomLeft, factor: smoothingFactor),
-                    bottomRight: interpolate(from: current.bottomRight, to: newBounds.bottomRight, factor: smoothingFactor)
+                    bottomRight: interpolate(from: current.bottomRight, to: newBounds.bottomRight, factor: smoothingFactor),
+                    confidence: newBounds.confidence
                 )
             } else {
                 smoothedBounds = newBounds
@@ -286,8 +437,8 @@ final class ScannerViewModel: ObservableObject {
             return
         }
         
-        // Check stability for auto-scan
-        if let newBounds = bounds, let oldBounds = currentBounds {
+        // Check stability for auto-scan (use filtered bounds)
+        if let newBounds = filteredBounds, let oldBounds = smoothedBounds {
             let movement = maxMovement(from: oldBounds, to: newBounds)
             
             if movement < boundsMovementThreshold {
@@ -306,6 +457,36 @@ final class ScannerViewModel: ObservableObject {
         } else {
             stableFrameCount = 0
             stabilityProgress = 0
+        }
+    }
+    
+    /// Filter detected bounds based on orientation preference
+    private func filterBoundsByOrientation(_ bounds: ImageProcessor.DocumentBounds?) -> ImageProcessor.DocumentBounds? {
+        guard let bounds = bounds else { return nil }
+        
+        switch scanOrientation {
+        case .auto:
+            return bounds
+            
+        case .landscape:
+            // Only accept if width > height
+            let width = abs(bounds.topRight.x - bounds.topLeft.x)
+            let height = abs(bounds.topLeft.y - bounds.bottomLeft.y)
+            if width > height * 0.9 {  // Allow some tolerance
+                return bounds
+            }
+            // Return existing smoothed bounds or default landscape
+            return smoothedBounds ?? createDefaultBounds(for: .landscape)
+            
+        case .portrait:
+            // Only accept if height > width
+            let width = abs(bounds.topRight.x - bounds.topLeft.x)
+            let height = abs(bounds.topLeft.y - bounds.bottomLeft.y)
+            if height > width * 0.9 {  // Allow some tolerance
+                return bounds
+            }
+            // Return existing smoothed bounds or default portrait
+            return smoothedBounds ?? createDefaultBounds(for: .portrait)
         }
     }
     
@@ -341,10 +522,10 @@ final class ScannerViewModel: ObservableObject {
         // Apply orientation correction from EXIF
         let orientedImage = correctOrientation(ciImage)
         
-        // Use manual bounds if available, otherwise detect
+        // Use capture bounds (locked > manual > detected)
         let bounds: ImageProcessor.DocumentBounds?
-        if let manual = manualBoundsAdjustment {
-            bounds = manual
+        if let captureBounds = captureBounds {
+            bounds = captureBounds
         } else {
             bounds = await imageProcessor.detectDocument(in: orientedImage)
         }
@@ -374,8 +555,8 @@ final class ScannerViewModel: ObservableObject {
             lastCapturedPageId = page.id
         }
         
-        // Clear manual bounds after capture
-        manualBoundsAdjustment = nil
+        // DON'T clear manual/locked bounds after capture - keep them for next scan
+        // This allows consistent scanning of multiple pages
         
         // Show capture success overlay
         showCaptureSuccess = true

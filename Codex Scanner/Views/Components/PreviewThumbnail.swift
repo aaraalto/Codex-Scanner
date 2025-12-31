@@ -8,7 +8,7 @@
 import SwiftUI
 
 /// Thumbnail view for displaying a captured page in the preview sidebar
-/// Uses native macOS styling with subtle selection states
+/// Uses native macOS Tahoe styling with refined selection states
 struct PreviewThumbnail: View {
     let page: CapturedPage
     let pageNumber: Int
@@ -16,19 +16,26 @@ struct PreviewThumbnail: View {
     
     @State private var isHovered = false
     
+    private let thumbnailHeight: CGFloat = 110
+    private let cornerRadius: CGFloat = 10
+    
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             if let thumbnail = page.thumbnail {
                 Image(nsImage: thumbnail)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .shadow(color: .black.opacity(isSelected ? 0.15 : 0.08), radius: isSelected ? 6 : 3, y: 2)
+                    .frame(height: thumbnailHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(isSelected ? 0.2 : 0.1), radius: isSelected ? 8 : 4, y: 3)
             } else {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
-                    .frame(height: 100)
+                    .frame(height: thumbnailHeight)
                     .overlay {
                         ProgressView()
                             .controlSize(.small)
@@ -36,17 +43,17 @@ struct PreviewThumbnail: View {
             }
             
             Text("\(pageNumber)")
-                .font(.system(.caption2, design: .rounded, weight: .medium))
+                .font(.system(.caption, design: .rounded, weight: .semibold))
                 .foregroundStyle(isSelected ? .primary : .secondary)
         }
-        .padding(8)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.12) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.15) : (isHovered ? Color.primary.opacity(0.05) : Color.clear))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 2)
         )
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.12)) {

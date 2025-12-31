@@ -7,8 +7,8 @@
 
 import SwiftUI
 
-/// Large circular record button with refined macOS styling
-/// Shows red square when recording, circle when idle
+/// Compact play/pause button for scanning control
+/// Clean, minimal design that doesn't distract from the content
 struct RecordButton: View {
     let isRecording: Bool
     let isEnabled: Bool
@@ -17,11 +17,9 @@ struct RecordButton: View {
     @State private var isHovered = false
     @State private var isPressed = false
     
-    // Design constants
-    private let outerSize: CGFloat = 80
-    private let innerSquareSize: CGFloat = 32
-    private let innerCircleSize: CGFloat = 60
-    private let borderWidth: CGFloat = 3
+    // Compact sizing
+    private let buttonSize: CGFloat = 52
+    private let iconSize: CGFloat = 18
     
     init(isRecording: Bool, isEnabled: Bool = true, action: @escaping () -> Void) {
         self.isRecording = isRecording
@@ -32,59 +30,70 @@ struct RecordButton: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Outer ring
+                // Background
                 Circle()
                     .fill(.regularMaterial)
-                    .frame(width: outerSize, height: outerSize)
+                    .overlay(
+                        Circle()
+                            .fill(isRecording ? Color.red.opacity(0.15) : Color.clear)
+                    )
                     .overlay(
                         Circle()
                             .strokeBorder(
-                                isRecording ? Color.red : Color.primary.opacity(0.15),
-                                lineWidth: borderWidth
+                                isRecording 
+                                    ? Color.red.opacity(0.6)
+                                    : Color.white.opacity(isHovered ? 0.3 : 0.15),
+                                lineWidth: 1.5
                             )
                     )
-                    .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
                 
-                // Inner shape - square when recording, circle when idle
-                if isRecording {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.red)
-                        .frame(width: innerSquareSize, height: innerSquareSize)
-                        .shadow(color: Color.red.opacity(0.5), radius: 8)
-                } else {
-                    Circle()
-                        .fill(Color.primary.opacity(0.85))
-                        .frame(width: innerCircleSize, height: innerCircleSize)
-                }
+                // Icon
+                Image(systemName: isRecording ? "pause.fill" : "play.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundStyle(isRecording ? .red : .primary)
+                    .offset(x: isRecording ? 0 : 2) // Optical centering for play icon
             }
-            .scaleEffect(isPressed ? 0.94 : (isHovered ? 1.03 : 1.0))
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isPressed)
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
+            .frame(width: buttonSize, height: buttonSize)
+            .scaleEffect(isPressed ? 0.92 : (isHovered ? 1.05 : 1.0))
+            .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1.0 : 0.5)
+        .opacity(isEnabled ? 1.0 : 0.4)
         .onHover { hovering in
             guard isEnabled else { return }
-            isHovered = hovering
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { _ in isPressed = true }
-                .onEnded { _ in isPressed = false }
+                .onChanged { _ in 
+                    if isEnabled { 
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            isPressed = true 
+                        }
+                    } 
+                }
+                .onEnded { _ in 
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        isPressed = false 
+                    }
+                }
         )
-        .help(isRecording ? "Stop Scanning" : "Start Scanning")
+        .help(isRecording ? "Pause Scanning" : "Start Scanning")
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: isRecording)
     }
 }
 
 #Preview {
-    VStack(spacing: 40) {
+    HStack(spacing: 30) {
         RecordButton(isRecording: false) {
-            print("Start recording")
+            print("Start")
         }
         
         RecordButton(isRecording: true) {
-            print("Stop recording")
+            print("Pause")
         }
         
         RecordButton(isRecording: false, isEnabled: false) {

@@ -8,7 +8,8 @@
 import SwiftUI
 import AppKit
 
-/// Document preview with native macOS styling before committing to a book
+/// Document preview with native macOS Tahoe styling before committing to a book
+/// NOTE: This is now primarily used as a fallback - main preview is integrated into ScannerView
 struct PreviewView: View {
     @ObservedObject var viewModel: ScannerViewModel
     @Binding var isPresented: Bool
@@ -26,7 +27,7 @@ struct PreviewView: View {
             HSplitView {
                 // Page thumbnails
                 thumbnailSidebar
-                    .frame(minWidth: 140, maxWidth: 180)
+                    .frame(minWidth: 150, maxWidth: 200)
                 
                 // Selected page preview
                 pagePreview
@@ -37,7 +38,7 @@ struct PreviewView: View {
             // Footer with actions
             footer
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 950, minHeight: 650)
         .background(Color(nsColor: .windowBackgroundColor))
     }
     
@@ -45,59 +46,67 @@ struct PreviewView: View {
     
     private var header: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Document Preview")
-                    .font(.headline)
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
                 Text("\(viewModel.capturedPages.count) \(viewModel.capturedPages.count == 1 ? "page" : "pages")")
-                    .font(.subheadline)
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
             }
             
             Spacer()
             
             // Zoom controls
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Button {
-                    zoomLevel = max(0.25, zoomLevel - 0.25)
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = max(0.25, zoomLevel - 0.25)
+                    }
                 } label: {
                     Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
                 }
                 .buttonStyle(.borderless)
                 .disabled(zoomLevel <= 0.25)
                 
                 Text("\(Int(zoomLevel * 100))%")
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(.caption, design: .monospaced, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(width: 50)
+                    .frame(width: 52)
                 
                 Button {
-                    zoomLevel = min(4.0, zoomLevel + 0.25)
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = min(4.0, zoomLevel + 0.25)
+                    }
                 } label: {
                     Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
                 }
                 .buttonStyle(.borderless)
                 .disabled(zoomLevel >= 4.0)
                 
                 Divider()
-                    .frame(height: 16)
+                    .frame(height: 18)
                 
                 Button {
-                    zoomLevel = 1.0
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = 1.0
+                    }
                 } label: {
                     Text("Fit")
-                        .font(.caption)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(.regularMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
             )
             
@@ -111,15 +120,15 @@ struct PreviewView: View {
             .buttonStyle(.plain)
             .help("Close Preview")
         }
-        .padding()
-        .background(.bar)
+        .padding(18)
+        .background(.regularMaterial)
     }
     
     // MARK: - Thumbnail Sidebar
     
     private var thumbnailSidebar: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 10) {
                 ForEach(Array(viewModel.capturedPages.enumerated()), id: \.element.id) { index, page in
                     PreviewThumbnail(
                         page: page,
@@ -127,7 +136,9 @@ struct PreviewView: View {
                         isSelected: index == selectedPageIndex
                     )
                     .onTapGesture {
-                        selectedPageIndex = index
+                        withAnimation(.spring(response: 0.3)) {
+                            selectedPageIndex = index
+                        }
                     }
                     .contextMenu {
                         Button(role: .destructive) {
@@ -141,7 +152,7 @@ struct PreviewView: View {
                     }
                 }
             }
-            .padding()
+            .padding(16)
         }
         .background(Color(nsColor: .controlBackgroundColor))
     }
@@ -159,20 +170,25 @@ struct PreviewView: View {
             } else if selectedPageIndex < viewModel.capturedPages.count {
                 let page = viewModel.capturedPages[selectedPageIndex]
                 
-                ScrollView([.horizontal, .vertical]) {
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
                     if let image = page.displayImage {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .scaleEffect(zoomLevel)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(24)
+                            .padding(28)
                     } else {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                .background(Color(nsColor: .textBackgroundColor))
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(16)
             }
         }
     }
@@ -182,26 +198,34 @@ struct PreviewView: View {
     private var footer: some View {
         HStack {
             // Page navigation
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Button {
-                    selectedPageIndex = max(0, selectedPageIndex - 1)
+                    withAnimation(.spring(response: 0.3)) {
+                        selectedPageIndex = max(0, selectedPageIndex - 1)
+                    }
                 } label: {
                     Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
                 .disabled(selectedPageIndex == 0)
                 
                 Text("Page \(selectedPageIndex + 1) of \(viewModel.capturedPages.count)")
-                    .font(.subheadline)
+                    .font(.system(.body, design: .rounded, weight: .medium))
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 120)
+                    .frame(minWidth: 140)
                 
                 Button {
-                    selectedPageIndex = min(viewModel.capturedPages.count - 1, selectedPageIndex + 1)
+                    withAnimation(.spring(response: 0.3)) {
+                        selectedPageIndex = min(viewModel.capturedPages.count - 1, selectedPageIndex + 1)
+                    }
                 } label: {
                     Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
                 .disabled(selectedPageIndex >= viewModel.capturedPages.count - 1)
             }
             .disabled(viewModel.capturedPages.isEmpty)
@@ -209,7 +233,7 @@ struct PreviewView: View {
             Spacer()
             
             // Actions
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Button(role: .destructive) {
                     viewModel.clearAllPages()
                     isPresented = false
@@ -224,8 +248,8 @@ struct PreviewView: View {
                 .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
-        .background(.bar)
+        .padding(18)
+        .background(.regularMaterial)
     }
 }
 
