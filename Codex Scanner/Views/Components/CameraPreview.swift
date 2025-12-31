@@ -37,16 +37,12 @@ final class CameraPreviewView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        layer?.cornerRadius = 12
-        layer?.masksToBounds = true
     }
     
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        layer?.cornerRadius = 12
-        layer?.masksToBounds = true
     }
     
     private func setupPreviewLayer() {
@@ -55,9 +51,9 @@ final class CameraPreviewView: NSView {
         guard let session = session else { return }
         
         let previewLayer = AVCaptureVideoPreviewLayer(session: session)
-        previewLayer.videoGravity = .resizeAspect
+        // Fill the container - no black bars
+        previewLayer.videoGravity = .resizeAspectFill
         previewLayer.frame = bounds
-        previewLayer.cornerRadius = 12
         
         // Fix orientation - set connection orientation if available
         if let connection = previewLayer.connection {

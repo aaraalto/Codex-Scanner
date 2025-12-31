@@ -4,8 +4,8 @@
 //
 //  Created by Aaron Aalto on 12/30/25.
 //
-//  A "Thanos snap" style particle dissolution effect for SwiftUI.
-//  Pixels break apart and scatter/drift away based on procedural noise.
+//  A graceful particle dissolution effect for SwiftUI.
+//  Pixels gently float away with smooth, elegant motion.
 //  Particles are contained within the thumbnail bounds.
 //
 
@@ -13,14 +13,28 @@
 #include <SwiftUI/SwiftUI_Metal.h>
 using namespace metal;
 
+// Helper: Smooth noise function
+float smoothNoise(float2 p) {
+    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
 // Helper: Check if position is within rounded rectangle
 float roundedRectSDF(float2 p, float2 size, float radius) {
     float2 q = abs(p) - size + radius;
     return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
 }
 
-/// Particle dissolve effect - pixels break apart and scatter away
-/// Contained within the thumbnail's rounded rectangle bounds
+// Helper: Smooth easing function (ease out cubic)
+float easeOutCubic(float t) {
+    return 1.0 - pow(1.0 - t, 3.0);
+}
+
+// Helper: Smooth easing function (ease in out sine)
+float easeInOutSine(float t) {
+    return -(cos(3.14159 * t) - 1.0) / 2.0;
+}
+
+/// Graceful particle dissolve effect - pixels gently float away
 /// @param position Current pixel position
 /// @param layer The SwiftUI layer to sample from
 /// @param progress Animation progress from 0.0 (intact) to 1.0 (fully dissolved)
@@ -50,71 +64,89 @@ float roundedRectSDF(float2 p, float2 size, float radius) {
     // Normalize position to 0-1 range
     float2 uv = position / size;
     
-    // Multi-octave noise for organic dissolve pattern
-    float2 noiseCoord = uv * 30.0;
-    float noise1 = fract(sin(dot(noiseCoord, float2(12.9898, 78.233))) * 43758.5453);
-    float noise2 = fract(sin(dot(noiseCoord * 2.0, float2(39.346, 11.135))) * 43758.5453);
-    float noise = (noise1 + noise2) * 0.5;
+    // Layered noise for organic, flowing dissolve pattern
+    float2 noiseCoord = uv * 20.0;
+    float noise1 = smoothNoise(noiseCoord);
+    float noise2 = smoothNoise(noiseCoord * 1.5 + 7.0);
+    float noise3 = smoothNoise(noiseCoord * 0.7 + 13.0);
+    float noise = (noise1 * 0.5 + noise2 * 0.3 + noise3 * 0.2);
     
-    // Add some variation based on position - dissolve from edges and top first
-    float edgeFactor = min(uv.x, 1.0 - uv.x) * min(uv.y, 1.0 - uv.y) * 4.0;
-    float topBias = 1.0 - uv.y * 0.4; // Top dissolves slightly earlier
+    // Gentle dissolve from top-center outward
+    float distFromTop = uv.y;
+    float distFromCenter = abs(uv.x - 0.5) * 2.0;
     
-    // Calculate threshold - when progress exceeds this, the pixel dissolves
-    float threshold = noise * 0.7 + edgeFactor * 0.2 + topBias * 0.1;
+    // Smooth threshold - creates a gentle wave of dissolution
+    float threshold = noise * 0.5 + distFromTop * 0.3 + (1.0 - distFromCenter) * 0.2;
     
-    // Smooth the progress curve for more pleasing animation
-    float smoothProgress = progress * progress * (3.0 - 2.0 * progress); // Smoothstep
+    // Very smooth progress curve
+    float smoothProgress = easeInOutSine(progress);
     
     // Check if this pixel should be dissolved
-    if (smoothProgress > threshold) {
-        // Calculate how far into dissolution this particle is (0 to 1)
-        float lifetime = (smoothProgress - threshold) / max(0.001, 1.0 - threshold);
-        lifetime = min(1.0, lifetime * 1.5); // Speed up individual particle fade
+    if (smoothProgress > threshold * 0.9) {
+        // Calculate particle lifetime with smooth onset
+        float rawLifetime = (smoothProgress - threshold * 0.9) / max(0.01, 1.0 - threshold * 0.9);
+        float lifetime = easeOutCubic(clamp(rawLifetime, 0.0, 1.0));
         
-        // Particle physics - drift direction based on noise
-        float angle = noise * 6.28318 + position.x * 0.01;
-        float speed = 20.0 + noise * 40.0;
+        // === GRACEFUL FLOATING MOTION ===
         
-        // Drift: outward scatter + upward float
+        // Gentle upward drift - like leaves floating up
+        float baseSpeed = 25.0 + noise * 15.0;
+        float upwardDrift = -lifetime * baseSpeed;
+        
+        // Soft horizontal sway - sinusoidal motion
+        float swayFreq = 2.0 + noise * 2.0;
+        float swayAmp = 8.0 + noise2 * 6.0;
+        float horizontalSway = sin(lifetime * swayFreq * 3.14159 + noise * 6.28) * swayAmp * lifetime;
+        
+        // Slight outward spread from center
+        float spreadDir = sign(uv.x - 0.5);
+        float spread = spreadDir * lifetime * 5.0 * (1.0 + noise);
+        
         float2 drift = float2(
-            cos(angle) * lifetime * speed,
-            -lifetime * 50.0 - sin(noise * 3.14159) * 30.0 * lifetime
+            horizontalSway + spread,
+            upwardDrift
         );
         
-        // Add some turbulence/wiggle
-        drift.x += sin(lifetime * 10.0 + noise * 6.28) * 5.0 * lifetime;
-        
-        // === CONTAIN WITHIN BOUNDS ===
+        // === SOFT BOUNDS CONTAINMENT ===
         float2 newPos = position + drift;
         float2 newCentered = newPos - center;
-        float newSDF = roundedRectSDF(newCentered, center - 2.0, cornerRadius);
+        float margin = 4.0;
+        float newSDF = roundedRectSDF(newCentered, center - margin, cornerRadius);
         
-        // If particle would exit bounds, fade it out instead
-        if (newSDF > -2.0) {
-            float edgeFade = 1.0 - smoothstep(-4.0, 0.0, newSDF);
-            if (edgeFade < 0.01) {
+        // Soft fade at edges
+        if (newSDF > -margin) {
+            float edgeFade = smoothstep(0.0, -margin, newSDF);
+            drift *= edgeFade;
+            if (edgeFade < 0.05) {
                 return half4(0.0);
             }
-            // Reduce drift to keep particle visible longer at edge
-            drift *= edgeFade;
         }
         
-        // Sample from the drifted position (particle carries its original color)
-        float2 samplePos = position - drift;
-        samplePos = clamp(samplePos, float2(0.0), size);
+        // Sample from drifted position
+        float2 samplePos = position - drift * 0.3; // Subtle sampling offset
+        samplePos = clamp(samplePos, float2(2.0), size - 2.0);
         
         half4 particleColor = layer.sample(samplePos);
         
-        // Fade out as particle drifts
-        float alpha = max(0.0, 1.0 - lifetime);
-        alpha = alpha * alpha; // Quadratic falloff for snappier disappearance
+        // === GRACEFUL FADE ===
         
-        // Slight brightness increase as particles "burn out"
-        float brightness = 1.0 + lifetime * 0.3;
+        // Smooth S-curve fade out
+        float fadeStart = 0.3;
+        float alpha;
+        if (lifetime < fadeStart) {
+            alpha = 1.0;
+        } else {
+            float fadeProgress = (lifetime - fadeStart) / (1.0 - fadeStart);
+            alpha = 1.0 - easeInOutSine(fadeProgress);
+        }
         
-        // If particle has faded completely, return transparent
-        if (alpha < 0.01) {
+        // Gentle brightness lift as particles fade
+        float brightness = 1.0 + lifetime * 0.15;
+        
+        // Very soft final fade
+        alpha *= smoothstep(1.0, 0.85, lifetime);
+        
+        if (alpha < 0.02) {
             return half4(0.0);
         }
         

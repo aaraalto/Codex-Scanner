@@ -32,6 +32,18 @@ final class Book {
         pages.count
     }
     
+    /// Returns true if the book was created within the last 24 hours
+    var isNew: Bool {
+        let twentyFourHoursAgo = Date().addingTimeInterval(-24 * 60 * 60)
+        return createdAt > twentyFourHoursAgo
+    }
+    
+    /// Time remaining until the "New" badge expires (for display)
+    var newBadgeTimeRemaining: TimeInterval {
+        let expirationDate = createdAt.addingTimeInterval(24 * 60 * 60)
+        return max(0, expirationDate.timeIntervalSinceNow)
+    }
+    
     func addPage(_ page: Page) {
         page.order = pages.count
         pages.append(page)

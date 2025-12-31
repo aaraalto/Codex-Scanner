@@ -7,10 +7,9 @@
 
 import SwiftUI
 
-/// Individual scanned page thumbnail with liquid glass styling
-/// Shows page image, page numbers, and hover state with delete button
-/// Features a particle dissolution effect when deleted
-/// Supports macOS Dock-style pull-up to delete gesture
+/// Individual scanned page thumbnail - clean minimal style
+/// Shows page image, page numbers, and hover state with delete
+/// Features particle dissolution effect when deleted
 struct ScanThumbnail: View {
     let image: NSImage?
     let pageNumbers: String
@@ -24,12 +23,12 @@ struct ScanThumbnail: View {
     @State private var isDragging = false
     @State private var showDeleteHint = false
     
-    // Design constants
-    private let thumbnailWidth: CGFloat = 100
-    private let thumbnailHeight: CGFloat = 132
-    private let cornerRadius: CGFloat = 12
-    private let dissolveDuration: Double = 0.5
-    private let deleteThreshold: CGFloat = -80 // How far up to drag to delete
+    // Design constants - compact
+    private let thumbnailWidth: CGFloat = 80
+    private let thumbnailHeight: CGFloat = 104
+    private let cornerRadius: CGFloat = 6
+    private let dissolveDuration: Double = 0.6
+    private let deleteThreshold: CGFloat = -60
     
     init(
         image: NSImage?,
@@ -44,7 +43,7 @@ struct ScanThumbnail: View {
     }
     
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             // Thumbnail image container with dissolve effect
             thumbnailContent
                 .layerEffect(
@@ -52,26 +51,26 @@ struct ScanThumbnail: View {
                         .float(dissolveProgress),
                         .float2(thumbnailWidth, thumbnailHeight)
                     ),
-                    maxSampleOffset: .zero, // Particles contained within bounds
+                    maxSampleOffset: .zero,
                     isEnabled: isDissolving
                 )
                 .offset(dragOffset)
                 .opacity(deleteOpacity)
                 .scaleEffect(deleteScale)
                 .rotation3DEffect(
-                    .degrees(Double(dragOffset.height) * 0.15),
+                    .degrees(Double(dragOffset.height) * 0.12),
                     axis: (x: 1, y: 0, z: 0),
                     perspective: 0.5
                 )
                 .gesture(deleteGesture)
             
-            // Page numbers label - also fade out during dissolution
+            // Page numbers label
             Text(pageNumbers)
-                .font(.system(.caption, design: .rounded, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
                 .opacity(isDissolving ? 1.0 - dissolveProgress : 1.0)
         }
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .onHover { hovering in
             guard !isDissolving && !isDragging else { return }
             isHovered = hovering
@@ -81,13 +80,12 @@ struct ScanThumbnail: View {
             onTap?()
         }
         .overlay(alignment: .top) {
-            // Delete hint when dragging up
             if showDeleteHint {
                 deleteHintBubble
-                    .offset(y: -50)
+                    .offset(y: -40)
                     .transition(.asymmetric(
-                        insertion: .scale(scale: 0.8).combined(with: .opacity),
-                        removal: .opacity.animation(.easeOut(duration: 0.15))
+                        insertion: .scale(scale: 0.85).combined(with: .opacity),
+                        removal: .opacity.animation(.easeOut(duration: 0.12))
                     ))
             }
         }
@@ -96,20 +94,12 @@ struct ScanThumbnail: View {
     // MARK: - Delete Hint Bubble
     
     private var deleteHintBubble: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "trash.fill")
-                .font(.system(size: 11, weight: .semibold))
-            Text("Release to Delete")
-                .font(.system(size: 11, weight: .semibold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(.red)
-                .shadow(color: .red.opacity(0.4), radius: 12, y: 4)
-        )
+        Label("Release to delete", systemImage: "trash")
+            .font(.caption2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.red, in: Capsule())
+            .foregroundStyle(.white)
     }
     
     // MARK: - Computed Properties for Drag
@@ -126,7 +116,7 @@ struct ScanThumbnail: View {
         return 1.0 - (progress * 0.15)
     }
     
-    // MARK: - Delete Gesture (Dock-style pull up)
+    // MARK: - Drag Gesture (free movement, snaps back - no reordering)
     
     private var deleteGesture: some Gesture {
         DragGesture()
@@ -135,35 +125,37 @@ struct ScanThumbnail: View {
                 isDragging = true
                 isHovered = false
                 
-                // Only allow upward drag for delete
                 let translation = value.translation
-                if translation.height < 0 {
-                    // Rubber band effect - gets harder to drag as you go further
-                    let resistance: CGFloat = 0.6
-                    dragOffset = CGSize(
-                        width: translation.width * 0.3,
-                        height: translation.height * resistance
-                    )
-                    
-                    // Show delete hint when past threshold
-                    let pastThreshold = translation.height < deleteThreshold
+                
+                // Allow free movement in all directions with slight resistance
+                let resistance: CGFloat = 0.7
+                dragOffset = CGSize(
+                    width: translation.width * resistance,
+                    height: translation.height * resistance
+                )
+                
+                // Show delete hint only when dragged significantly upward
+                if translation.height < deleteThreshold {
+                    let pastThreshold = true
                     if pastThreshold != showDeleteHint {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showDeleteHint = pastThreshold
+                            showDeleteHint = true
                         }
                     }
-                } else {
-                    dragOffset = CGSize(width: translation.width * 0.1, height: 0)
+                } else if showDeleteHint {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showDeleteHint = false
+                    }
                 }
             }
             .onEnded { value in
                 isDragging = false
                 
-                // If dragged past threshold, delete with poof effect
+                // If dragged past upward threshold, delete with poof effect
                 if value.translation.height < deleteThreshold {
                     performPoofDelete()
                 } else {
-                    // Snap back
+                    // Snap back to original position (no reordering)
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
                         dragOffset = .zero
                         showDeleteHint = false
@@ -185,81 +177,73 @@ struct ScanThumbnail: View {
                     .clipped()
             } else {
                 Rectangle()
-                    .fill(.ultraThinMaterial)
+                    .fill(Color.primary.opacity(0.03))
                     .frame(width: thumbnailWidth, height: thumbnailHeight)
                     .overlay {
                         Image(systemName: "doc.text")
-                            .font(.title2)
+                            .font(.title3)
                             .foregroundStyle(.quaternary)
                     }
             }
             
-            // Hover overlay with glass delete button (no scale change)
+            // Hover overlay with delete button
             if isHovered && !isDissolving && !isDragging {
                 Rectangle()
-                    .fill(.black.opacity(0.45))
+                    .fill(.ultraThinMaterial)
                     .transition(.opacity)
                 
                 Button(action: deleteWithEffect) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                                .overlay(
-                                    Circle()
-                                        .fill(Color.red.opacity(0.75))
-                                )
-                        )
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
-                        )
-                        .shadow(color: Color.red.opacity(0.5), radius: 10)
+                    Label("Delete", systemImage: "trash")
+                        .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.plain)
-                .transition(.scale(scale: 0.85).combined(with: .opacity))
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .controlSize(.small)
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.25), Color.white.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                 .opacity(isDissolving ? 1.0 - dissolveProgress : 1.0)
         )
-        .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
     }
     
     // MARK: - Deletion Effects
     
+    /// Play a soft, pleasant delete sound
+    private func playDeleteSound() {
+        // Try different system sounds for a pleasant delete effect
+        // "Blow" is a soft woosh, "Submarine" is gentle, "Glass" is crisp
+        let soundNames = ["Blow", "Submarine", "Glass", "Pop"]
+        for name in soundNames {
+            if let sound = NSSound(named: name) {
+                sound.volume = 0.6 // Softer volume
+                sound.play()
+                return
+            }
+        }
+    }
+    
     /// Poof effect for drag-to-delete (like macOS Dock)
     private func performPoofDelete() {
-        // Play poof sound
-        if let sound = NSSound(named: "Funk") {
-            sound.play()
-        }
+        playDeleteSound()
         
-        withAnimation(.easeOut(duration: 0.25)) {
-            dragOffset = CGSize(width: 0, height: -30)
+        // Gentle upward float before dissolving
+        withAnimation(.easeOut(duration: 0.3)) {
+            dragOffset = CGSize(width: 0, height: -20)
             showDeleteHint = false
         }
         
-        // Trigger dissolve
+        // Trigger graceful dissolve
         isDissolving = true
-        withAnimation(.easeOut(duration: dissolveDuration * 0.6)) {
+        withAnimation(.easeInOut(duration: dissolveDuration)) {
             dissolveProgress = 1.0
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + dissolveDuration * 0.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + dissolveDuration) {
             onDelete()
         }
     }
@@ -268,11 +252,13 @@ struct ScanThumbnail: View {
     private func deleteWithEffect() {
         guard !isDissolving else { return }
         
+        playDeleteSound()
+        
         isDissolving = true
         isHovered = false
         
-        // Animate the dissolution progress
-        withAnimation(.easeOut(duration: dissolveDuration)) {
+        // Graceful ease-in-out animation for smooth dissolution
+        withAnimation(.easeInOut(duration: dissolveDuration)) {
             dissolveProgress = 1.0
         }
         
@@ -283,28 +269,28 @@ struct ScanThumbnail: View {
     }
 }
 
-/// Empty placeholder slot with glass styling
+/// Empty placeholder slot - minimal dashed outline
 struct EmptyScanSlot: View {
-    private let slotWidth: CGFloat = 100
-    private let slotHeight: CGFloat = 132
-    private let cornerRadius: CGFloat = 12
+    private let slotWidth: CGFloat = 80
+    private let slotHeight: CGFloat = 104
+    private let cornerRadius: CGFloat = 6
     
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial.opacity(0.2))
+                .fill(Color.clear)
                 .frame(width: slotWidth, height: slotHeight)
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .strokeBorder(
-                            style: StrokeStyle(lineWidth: 1.5, dash: [8, 5])
+                            style: StrokeStyle(lineWidth: 1, dash: [6, 4])
                         )
-                        .foregroundStyle(Color.white.opacity(0.12))
+                        .foregroundStyle(Color.primary.opacity(0.08))
                 )
             
             // Spacer for alignment
             Text(" ")
-                .font(.system(.caption, design: .rounded))
+                .font(.system(size: 10))
                 .foregroundStyle(.clear)
         }
     }

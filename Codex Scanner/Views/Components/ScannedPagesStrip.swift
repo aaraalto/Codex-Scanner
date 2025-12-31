@@ -7,9 +7,8 @@
 
 import SwiftUI
 
-/// Horizontal scrolling strip of scanned page thumbnails with macOS Tahoe styling
-/// Displays at the bottom of the scanner view with refined visual design
-/// Features ripple animation when pages are deleted
+/// Horizontal scrolling strip of scanned page thumbnails
+/// Notion-meets-Apple design: clean, minimal, content-focused
 struct ScannedPagesStrip: View {
     let pages: [CapturedPage]
     let coverImage: NSImage?
@@ -21,10 +20,10 @@ struct ScannedPagesStrip: View {
     @State private var ripplePhase: Double = 0
     @State private var previousPageCount: Int = 0
     
-    // Design constants
-    private let stripHeight: CGFloat = 230
-    private let horizontalPadding: CGFloat = 32
-    private let thumbnailSpacing: CGFloat = 20
+    // Design constants - adjusted for larger higher-res thumbnails
+    private let stripHeight: CGFloat = 240
+    private let horizontalPadding: CGFloat = 24
+    private let thumbnailSpacing: CGFloat = 16
     private let emptySlotCount: Int = 3
     
     init(
@@ -41,41 +40,23 @@ struct ScannedPagesStrip: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Refined glass divider
+            // Subtle top border
             Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.15), Color.white.opacity(0.03)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
             
             VStack(spacing: 0) {
-                // Minimal header with page count
-                HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: pages.isEmpty ? "doc.text" : "doc.text.fill")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(pages.isEmpty ? .tertiary : .secondary)
-                        
-                        Text(pageCountText)
-                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                // Minimal header
+                HStack(alignment: .center) {
+                    Text(pageCountText)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.tertiary)
                     
                     Spacer()
-                    
-                    if !pages.isEmpty {
-                        Text("Drag up to remove")
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(.tertiary)
-                    }
                 }
                 .padding(.horizontal, horizontalPadding)
-                .padding(.top, 20)
-                .padding(.bottom, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
                 
                 // Horizontal scroll of thumbnails
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -118,11 +99,10 @@ struct ScannedPagesStrip: View {
                             }
                         }
                         .padding(.horizontal, horizontalPadding)
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 12)
                         .onChange(of: pages.count) { oldCount, newCount in
-                            // Auto-scroll to newest page when adding
                             if newCount > oldCount, let lastPage = pages.last {
-                                withAnimation(.easeOut(duration: 0.4)) {
+                                withAnimation(.easeOut(duration: 0.3)) {
                                     proxy.scrollTo(lastPage.id, anchor: .trailing)
                                 }
                             }
@@ -132,7 +112,7 @@ struct ScannedPagesStrip: View {
                 }
             }
             .frame(height: stripHeight)
-            .background(.regularMaterial)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
     
@@ -242,16 +222,16 @@ private struct RippleModifier: ViewModifier {
     }
 }
 
-/// Cover image thumbnail with glass styling
+/// Cover image thumbnail - clean minimal style
 private struct CoverThumbnail: View {
     let image: NSImage
     
-    private let thumbnailWidth: CGFloat = 90
-    private let thumbnailHeight: CGFloat = 120
-    private let cornerRadius: CGFloat = 10
+    private let thumbnailWidth: CGFloat = 80
+    private let thumbnailHeight: CGFloat = 104
+    private let cornerRadius: CGFloat = 6
     
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
@@ -259,13 +239,13 @@ private struct CoverThumbnail: View {
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
             
             Text("Cover")
-                .font(.system(.caption, design: .rounded, weight: .medium))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.tertiary)
         }
     }
 }

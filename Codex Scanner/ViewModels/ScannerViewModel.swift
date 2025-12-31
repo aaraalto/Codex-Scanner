@@ -39,6 +39,9 @@ final class ScannerViewModel: ObservableObject {
     @Published var manualBoundsAdjustment: ImageProcessor.DocumentBounds?  // User adjustments
     @Published var capturedPages: [CapturedPage] = []
     @Published var selectedPreset: ImageProcessor.FilterPreset = .original
+    @Published var selectedProcessingMode: ImageProcessor.ProcessingMode = .mixed  // ML processing mode
+    @Published var exportQuality: ImageProcessor.ExportQuality = .high  // Apple Books export quality
+    @Published var autoDetectContentMode = true  // Auto-detect best processing mode per page
     @Published var isProcessing = false
     @Published var errorMessage: String?
     @Published var stabilityProgress: Double = 0  // 0 to 1 for visual feedback
@@ -309,15 +312,62 @@ final class ScannerViewModel: ObservableObject {
             image: updatedPage.originalImage,
             bounds: updatedPage.bounds,
             preset: preset,
+            mode: updatedPage.processingMode,
             enhance: true
         )
-        updatedPage.thumbnail = imageProcessor.nsImage(from: updatedPage.processedImage)?
-            .resized(to: NSSize(width: 120, height: 160))
+        // Higher resolution thumbnails for better quality display
+        updatedPage.thumbnail = imageProcessor.createHighResThumbnail(
+            from: updatedPage.processedImage,
+            size: NSSize(width: 150, height: 200)
+        )
         
         capturedPages[index] = updatedPage
     }
     
-    /// Save all captured pages to a book
+    /// Update processing mode for a specific page
+    func updateProcessingMode(_ mode: ImageProcessor.ProcessingMode, for page: CapturedPage) {
+        guard let index = capturedPages.firstIndex(where: { $0.id == page.id }) else { return }
+        
+        var updatedPage = capturedPages[index]
+        updatedPage.processingMode = mode
+        updatedPage.processedImage = imageProcessor.process(
+            image: updatedPage.originalImage,
+            bounds: updatedPage.bounds,
+            preset: updatedPage.preset,
+            mode: mode,
+            enhance: true
+        )
+        updatedPage.thumbnail = imageProcessor.createHighResThumbnail(
+            from: updatedPage.processedImage,
+            size: NSSize(width: 150, height: 200)
+        )
+        
+        capturedPages[index] = updatedPage
+    }
+    
+    /// Reprocess all pages with current settings
+    func reprocessAllPages() async {
+        isProcessing = true
+        defer { isProcessing = false }
+        
+        for index in capturedPages.indices {
+            var page = capturedPages[index]
+            page.processedImage = imageProcessor.process(
+                image: page.originalImage,
+                bounds: page.bounds,
+                preset: page.preset,
+                mode: page.processingMode,
+                enhance: true
+            )
+            page.thumbnail = imageProcessor.createHighResThumbnail(
+                from: page.processedImage,
+                size: NSSize(width: 150, height: 200)
+            )
+            capturedPages[index] = page
+        }
+    }
+    
+    /// Save all captured pages to a book with high-quality export for Apple Books
     func saveToBook(_ book: Book, modelContext: ModelContext) async throws {
         isProcessing = true
         defer { isProcessing = false }
@@ -328,13 +378,18 @@ final class ScannerViewModel: ObservableObject {
         // Create folder if needed
         try FileManager.default.createDirectory(at: bookFolder, withIntermediateDirectories: true)
         
+        // Determine file extension based on quality
+        let fileExtension = exportQuality == .maximum ? "png" : "jpg"
+        
         for (index, capturedPage) in capturedPages.enumerated() {
-            let filename = "\(UUID().uuidString).jpg"
+            let filename = "\(UUID().uuidString).\(fileExtension)"
             let fileURL = bookFolder.appendingPathComponent(filename)
             
             // Apply orientation correction before saving
             let correctedImage = correctOrientation(capturedPage.processedImage)
-            try imageProcessor.save(image: correctedImage, to: fileURL)
+            
+            // Save with Apple Books optimized quality settings
+            try imageProcessor.save(image: correctedImage, to: fileURL, quality: exportQuality)
             
             let relativePath = "\(book.id.uuidString)/\(filename)"
             let page = Page(imagePath: relativePath, order: book.pageCount + index)
@@ -517,6 +572,10 @@ final class ScannerViewModel: ObservableObject {
         // Start cooldown
         isOnCooldown = true
         
+        // Reset stability progress immediately (progress bar starts at 0%)
+        stableFrameCount = 0
+        stabilityProgress = 0
+        
         defer { isProcessing = false }
         
         // Apply orientation correction from EXIF
@@ -530,22 +589,36 @@ final class ScannerViewModel: ObservableObject {
             bounds = await imageProcessor.detectDocument(in: orientedImage)
         }
         
-        // Process the image
+        // Determine processing mode - auto-detect or use selected
+        let processingMode: ImageProcessor.ProcessingMode
+        if autoDetectContentMode {
+            // Use ML to analyze content and pick best mode
+            processingMode = await imageProcessor.analyzeContent(in: orientedImage)
+        } else {
+            processingMode = selectedProcessingMode
+        }
+        
+        // Process the image with ML-enhanced pipeline
         let processed = imageProcessor.process(
             image: orientedImage,
             bounds: bounds,
             preset: selectedPreset,
+            mode: processingMode,
             enhance: true
         )
         
-        // Create thumbnail
-        let thumbnail = imageProcessor.nsImage(from: processed)?.resized(to: NSSize(width: 120, height: 160))
+        // Create high-resolution thumbnail for better quality display
+        let thumbnail = imageProcessor.createHighResThumbnail(
+            from: processed,
+            size: NSSize(width: 150, height: 200)
+        )
         
         let page = CapturedPage(
             originalImage: orientedImage,
             processedImage: processed,
             bounds: bounds,
             preset: selectedPreset,
+            processingMode: processingMode,
             thumbnail: thumbnail
         )
         

@@ -14,6 +14,9 @@ struct PageThumbnail: View {
     
     @State private var isHovered = false
     
+    // Silky smooth hover animation
+    private let hoverSpring = Animation.spring(response: 0.35, dampingFraction: 0.72, blendDuration: 0)
+    
     var body: some View {
         VStack(spacing: 8) {
             if let image = page.image {
@@ -22,7 +25,19 @@ struct PageThumbnail: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(height: 180)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .shadow(color: .black.opacity(isHovered ? 0.15 : 0.08), radius: isHovered ? 8 : 4, y: 2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                isHovered || isSelected ? Color.white.opacity(0.2) : Color.clear,
+                                lineWidth: 1
+                            )
+                    )
+                    // Dynamic shadow elevation on hover
+                    .shadow(
+                        color: .black.opacity(isHovered ? 0.2 : 0.08),
+                        radius: isHovered ? 14 : 4,
+                        y: isHovered ? 7 : 2
+                    )
             } else {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -36,21 +51,23 @@ struct PageThumbnail: View {
             
             Text("Page \(page.order + 1)")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isHovered ? .primary : .secondary)
         }
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.1) : (isHovered ? Color.primary.opacity(0.03) : Color.clear))
+                .fill(isSelected ? Color.accentColor.opacity(0.1) : (isHovered ? Color.primary.opacity(0.05) : Color.clear))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 2)
         )
+        // Silky smooth hover transformations
+        .scaleEffect(isHovered && !isSelected ? 1.025 : 1.0)
+        .offset(y: isHovered && !isSelected ? -4 : 0)
+        .animation(hoverSpring, value: isHovered)
         .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
+            isHovered = hovering
         }
         .contentShape(Rectangle())
     }

@@ -8,15 +8,12 @@
 import SwiftUI
 import AVFoundation
 
-/// Camera source selector with native macOS menu styling
-/// Shows connection status with a colored indicator dot
+/// Camera source selector with native macOS styling
 struct CameraSelector: View {
     let availableDevices: [AVCaptureDevice]
     let currentDevice: AVCaptureDevice?
     let isConnected: Bool
     let onSelectDevice: (AVCaptureDevice) -> Void
-    
-    private let statusDotSize: CGFloat = 7
     
     var body: some View {
         Menu {
@@ -37,34 +34,14 @@ struct CameraSelector: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
-                
-                // Connection status dot
+            HStack(spacing: 6) {
+                Image(systemName: isConnected ? "camera.fill" : "camera")
                 Circle()
-                    .fill(statusColor)
-                    .frame(width: statusDotSize, height: statusDotSize)
-                    .shadow(color: statusColor.opacity(0.5), radius: 2)
+                    .fill(isConnected ? Color.green : Color.orange)
+                    .frame(width: 6, height: 6)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
-            )
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
-    }
-    
-    private var statusColor: Color {
-        isConnected ? .green : .orange
     }
 }
 

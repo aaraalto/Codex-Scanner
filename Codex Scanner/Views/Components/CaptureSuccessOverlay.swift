@@ -7,126 +7,104 @@
 
 import SwiftUI
 
-/// Animated overlay shown after successful page capture with macOS Tahoe styling
+/// Capture success feedback - subtle edge flash + corner notification
+/// Shows page number and prompts to turn the page
 struct CaptureSuccessOverlay: View {
     let pageNumber: Int
-    @State private var showCheckmark = false
-    @State private var showText = false
-    @State private var glowPulse = false
+    let capturedImage: NSImage?
+    
+    @State private var showFlash = true
+    @State private var showNotification = false
+    
+    init(pageNumber: Int, capturedImage: NSImage? = nil) {
+        self.pageNumber = pageNumber
+        self.capturedImage = capturedImage
+    }
     
     var body: some View {
-        VStack(spacing: 28) {
-            // Success checkmark with glow animation
-            ZStack {
-                // Pulsing glow
-                Circle()
-                    .fill(Color.green.opacity(0.35))
-                    .frame(width: 110, height: 110)
-                    .blur(radius: glowPulse ? 35 : 25)
-                    .scaleEffect(glowPulse ? 1.25 : 1.0)
-                
-                // Glass circle
-                Circle()
-                    .fill(.regularMaterial)
-                    .frame(width: 88, height: 88)
-                    .overlay(
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.green.opacity(0.45), Color.green.opacity(0.25)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        Circle()
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color.green.opacity(0.85), Color.green.opacity(0.4)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2.5
-                            )
-                    )
-                    .shadow(color: Color.green.opacity(0.55), radius: 25)
-                    .scaleEffect(showCheckmark ? 1 : 0.5)
-                    .opacity(showCheckmark ? 1 : 0)
-                
-                Image(systemName: "checkmark")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: Color.green.opacity(0.6), radius: 6)
-                    .scaleEffect(showCheckmark ? 1 : 0)
+        ZStack {
+            // Quick edge flash effect (fades fast)
+            if showFlash {
+                Rectangle()
+                    .fill(Color.white)
+                    .opacity(0.3)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
             }
             
-            VStack(spacing: 14) {
-                Text("Page \(pageNumber) Captured")
-                    .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(.primary)
-                
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.turn.up.right")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Turn the page")
-                        .font(.system(.subheadline, design: .rounded, weight: .semibold))
+            // Corner notification - positioned top-right, non-blocking
+            VStack {
+                HStack {
+                    Spacer()
+                    
+                    if showNotification {
+                        notificationBadge
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .trailing).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                    }
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(.regularMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
-                )
+                .padding(.top, 16)
+                .padding(.trailing, 16)
+                
+                Spacer()
             }
-            .opacity(showText ? 1 : 0)
-            .offset(y: showText ? 0 : 12)
         }
-        .padding(44)
-        .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.12), Color.white.opacity(0.02)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.25), Color.white.opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-        )
-        .shadow(color: .black.opacity(0.25), radius: 45, y: 14)
         .onAppear {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) {
-                showCheckmark = true
+            // Quick flash
+            withAnimation(.easeOut(duration: 0.1)) {
+                showFlash = true
             }
-            withAnimation(.easeOut(duration: 0.35).delay(0.2)) {
-                showText = true
+            
+            // Flash fades quickly
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    showFlash = false
+                }
             }
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                glowPulse = true
+            
+            // Notification slides in
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8).delay(0.05)) {
+                showNotification = true
             }
         }
+    }
+    
+    private var notificationBadge: some View {
+        HStack(spacing: 10) {
+            // Thumbnail preview (if available)
+            if let image = capturedImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 32, height: 42)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.green)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Page \(pageNumber)")
+                    .font(.caption.weight(.semibold))
+                
+                Text("Turn the page →")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .shadow(radius: 8, y: 4)
     }
 }
 
 #Preview {
-    CaptureSuccessOverlay(pageNumber: 3)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
+    ZStack {
+        Color.gray
+        CaptureSuccessOverlay(pageNumber: 3, capturedImage: nil)
+    }
+    .frame(width: 800, height: 600)
 }
