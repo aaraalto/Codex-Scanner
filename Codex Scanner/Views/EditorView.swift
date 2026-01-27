@@ -14,7 +14,6 @@ struct EditorView: View {
     @State private var currentPreset: ImageProcessor.FilterPreset = .original
     @State private var rotation: Double = 0
     @State private var processedImage: NSImage?
-    @Environment(\.dismiss) private var dismiss
     
     private let imageProcessor = ImageProcessor()
     
@@ -63,7 +62,7 @@ struct EditorView: View {
     
     private var controlSection: some View {
         HStack(spacing: 24) {
-            // Rotation controls
+            // Rotation controls - subtle, not colored
             HStack(spacing: 8) {
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -72,7 +71,8 @@ struct EditorView: View {
                 } label: {
                     Label("Rotate Left", systemImage: "rotate.left")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
+                .opacity(0.6)
                 .help("Rotate left 90°")
                 
                 Button {
@@ -82,7 +82,8 @@ struct EditorView: View {
                 } label: {
                     Label("Rotate Right", systemImage: "rotate.right")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
+                .opacity(0.6)
                 .help("Rotate right 90°")
             }
             
@@ -101,6 +102,7 @@ struct EditorView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .notionSegmentedPicker()
                 .frame(width: 280)
                 .labelsHidden()
                 .onChange(of: currentPreset) { _, newValue in
@@ -109,13 +111,6 @@ struct EditorView: View {
             }
             
             Spacer()
-            
-            // Done button
-            Button("Done") {
-                dismiss()
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

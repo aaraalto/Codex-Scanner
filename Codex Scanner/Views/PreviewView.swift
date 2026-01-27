@@ -66,7 +66,7 @@ struct PreviewView: View {
                     Image(systemName: "minus.magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
                 .disabled(zoomLevel <= 0.25)
                 
                 Text("\(Int(zoomLevel * 100))%")
@@ -82,7 +82,7 @@ struct PreviewView: View {
                     Image(systemName: "plus.magnifyingglass")
                         .font(.system(size: 14, weight: .medium))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
                 .disabled(zoomLevel >= 4.0)
                 
                 Divider()
@@ -96,19 +96,20 @@ struct PreviewView: View {
                     Text("Fit")
                         .font(.system(.caption, design: .rounded, weight: .semibold))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.notionSecondary)
                 .controlSize(.small)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.regularMaterial)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.notionSurface.opacity(0.8))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
             )
+            .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
             
             Button {
                 isPresented = false
@@ -208,7 +209,7 @@ struct PreviewView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.notionSecondary)
                 .disabled(selectedPageIndex == 0)
                 
                 Text("Page \(selectedPageIndex + 1) of \(viewModel.capturedPages.count)")
@@ -225,7 +226,7 @@ struct PreviewView: View {
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.notionSecondary)
                 .disabled(selectedPageIndex >= viewModel.capturedPages.count - 1)
             }
             .disabled(viewModel.capturedPages.isEmpty)
@@ -245,7 +246,7 @@ struct PreviewView: View {
                 Button("Continue Scanning") {
                     isPresented = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.notionPrimary)
             }
         }
         .padding(18)

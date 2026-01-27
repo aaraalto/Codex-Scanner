@@ -35,83 +35,6 @@ struct ProcessingModeSelector: View {
     }
 }
 
-/// Extended processing mode selector with visual cards
-struct ProcessingModeCardSelector: View {
-    @Binding var selectedMode: ImageProcessor.ProcessingMode
-    @Binding var autoDetect: Bool
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header with auto-detect toggle
-            HStack {
-                Label("Content Type", systemImage: "doc.viewfinder")
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                Toggle(isOn: $autoDetect) {
-                    Text("Auto")
-                        .font(.system(.caption, design: .rounded))
-                }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-            }
-            
-            // Mode cards
-            HStack(spacing: 8) {
-                ForEach(ImageProcessor.ProcessingMode.allCases) { mode in
-                    ProcessingModeCard(
-                        mode: mode,
-                        isSelected: !autoDetect && selectedMode == mode,
-                        isDisabled: autoDetect
-                    ) {
-                        autoDetect = false
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedMode = mode
-                        }
-                    }
-                }
-            }
-            
-            // Description
-            if autoDetect {
-                Text("ML will automatically detect the best processing for each page")
-                    .font(.system(.caption2, design: .rounded))
-                    .foregroundColor(.secondary)
-            } else {
-                Text(selectedMode.description)
-                    .font(.system(.caption2, design: .rounded))
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-}
-
-/// Individual mode card
-struct ProcessingModeCard: View {
-    let mode: ImageProcessor.ProcessingMode
-    let isSelected: Bool
-    let isDisabled: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: mode.icon)
-                    .font(.title3)
-                Text(mode.rawValue)
-                    .font(.caption2)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-        }
-        .buttonStyle(.bordered)
-        .tint(isSelected ? .accentColor : nil)
-        .disabled(isDisabled)
-    }
-}
-
 /// Export quality selector for Apple Books
 struct ExportQualitySelector: View {
     @Binding var quality: ImageProcessor.ExportQuality
@@ -133,6 +56,7 @@ struct ExportQualitySelector: View {
                 }
             }
             .pickerStyle(.segmented)
+            .notionSegmentedPicker()
             
             // Quality description
             HStack {
@@ -161,15 +85,6 @@ struct ExportQualitySelector: View {
     )
     .padding()
     .background(.black)
-}
-
-#Preview("Card Selector") {
-    ProcessingModeCardSelector(
-        selectedMode: .constant(.mixed),
-        autoDetect: .constant(true)
-    )
-    .padding()
-    .frame(width: 400)
 }
 
 #Preview("Export Quality") {

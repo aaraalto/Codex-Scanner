@@ -19,7 +19,8 @@ final class CameraManager: NSObject, ObservableObject {
     @Published private(set) var currentDevice: AVCaptureDevice?
     @Published private(set) var availableDevices: [AVCaptureDevice] = []
     @Published private(set) var error: CameraError?
-    @Published var zoomFactor: CGFloat = 2.0  // Default to 2x zoom
+    @Published var zoomFactor: CGFloat = 1.0
+    @Published private(set) var maxZoomFactor: CGFloat = 5.0  // Digital zoom limit
     
     // MARK: - Public Properties
     
@@ -44,6 +45,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var videoOutput: AVCaptureVideoDataOutput?
     private var photoOutput: AVCapturePhotoOutput?
     private let videoQueue = DispatchQueue(label: "com.codexscanner.videoQueue", qos: .userInteractive)
+    private let sessionQueue = DispatchQueue(label: "com.codexscanner.sessionQueue")
     
     private var deviceDiscoverySession: AVCaptureDevice.DiscoverySession?
     private var deviceObserver: NSKeyValueObservation?
@@ -74,6 +76,11 @@ final class CameraManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
+        // Load saved zoom factor
+        let savedZoom = UserDefaults.standard.double(forKey: "CameraZoomFactor")
+        if savedZoom > 0 {
+            self.zoomFactor = CGFloat(savedZoom)
+        }
         setupDeviceDiscovery()
     }
     
@@ -104,14 +111,84 @@ final class CameraManager: NSObject, ObservableObject {
             return
         }
         
-        await configureSession(with: device)
-        
-        // Start session on background thread
+        // Configure and start on the session queue to avoid threading issues
         let captureSession = session
-        Task.detached {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            captureSession.beginConfiguration()
+            
+            // Remove existing inputs/outputs
+            for input in captureSession.inputs {
+                captureSession.removeInput(input)
+            }
+            for output in captureSession.outputs {
+                captureSession.removeOutput(output)
+            }
+            
+            // Add device input
+            guard let input = try? AVCaptureDeviceInput(device: device) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            
+            guard captureSession.canAddInput(input) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            captureSession.addInput(input)
+            
+            Task { @MainActor in
+                self.currentDevice = device
+            }
+            
+            // Configure video output
+            let videoOutput = AVCaptureVideoDataOutput()
+            videoOutput.setSampleBufferDelegate(self, queue: self.videoQueue)
+            videoOutput.alwaysDiscardsLateVideoFrames = true
+            videoOutput.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            
+            guard captureSession.canAddOutput(videoOutput) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            captureSession.addOutput(videoOutput)
+            
+            Task { @MainActor in
+                self.videoOutput = videoOutput
+            }
+            
+            // Configure photo output
+            let photoOutput = AVCapturePhotoOutput()
+            
+            guard captureSession.canAddOutput(photoOutput) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            captureSession.addOutput(photoOutput)
+            
+            Task { @MainActor in
+                self.photoOutput = photoOutput
+            }
+            
+            // Set session preset
+            if captureSession.canSetSessionPreset(.photo) {
+                captureSession.sessionPreset = .photo
+            }
+            
+            captureSession.commitConfiguration()
+            
+            // Now start running
             captureSession.startRunning()
-            await MainActor.run { [weak self] in
-                self?.isRunning = true
+            
+            Task { @MainActor in
+                self.isRunning = true
             }
         }
     }
@@ -119,9 +196,9 @@ final class CameraManager: NSObject, ObservableObject {
     /// Stop the capture session
     func stopSession() {
         let captureSession = session
-        Task.detached {
+        sessionQueue.async { [weak self] in
             captureSession.stopRunning()
-            await MainActor.run { [weak self] in
+            Task { @MainActor in
                 self?.isRunning = false
             }
         }
@@ -129,7 +206,37 @@ final class CameraManager: NSObject, ObservableObject {
     
     /// Switch to a different camera device
     func switchDevice(to device: AVCaptureDevice) async {
-        await configureSession(with: device)
+        let captureSession = session
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            captureSession.beginConfiguration()
+            
+            // Remove existing inputs
+            for input in captureSession.inputs {
+                captureSession.removeInput(input)
+            }
+            
+            // Add new device input
+            guard let input = try? AVCaptureDeviceInput(device: device) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            
+            guard captureSession.canAddInput(input) else {
+                Task { @MainActor in self.error = .configurationFailed }
+                captureSession.commitConfiguration()
+                return
+            }
+            captureSession.addInput(input)
+            
+            captureSession.commitConfiguration()
+            
+            Task { @MainActor in
+                self.currentDevice = device
+            }
+        }
     }
     
     /// Capture a high-resolution photo
@@ -145,13 +252,15 @@ final class CameraManager: NSObject, ObservableObject {
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
     
-    /// Set the camera zoom factor
-    /// Note: Video zoom is not available on macOS - this is a no-op placeholder
+    /// Set the camera zoom factor (digital zoom for macOS)
     func setZoom(_ factor: CGFloat) {
-        // Video zoom factor is not available on macOS
-        // On iOS, you would use device.videoZoomFactor
-        // For macOS, we just store the requested value but can't apply it
-        zoomFactor = factor
+        // macOS doesn't support hardware zoom - we use digital zoom
+        // Clamp to safe range
+        let clampedZoom = max(1.0, min(factor, maxZoomFactor))
+        self.zoomFactor = clampedZoom
+        
+        // Persist
+        UserDefaults.standard.set(Double(clampedZoom), forKey: "CameraZoomFactor")
     }
     
     // MARK: - Private Methods
@@ -185,61 +294,6 @@ final class CameraManager: NSObject, ObservableObject {
         }
         // Fallback to built-in camera
         return availableDevices.first
-    }
-    
-    private func configureSession(with device: AVCaptureDevice) async {
-        session.beginConfiguration()
-        defer { session.commitConfiguration() }
-        
-        // Remove existing inputs
-        session.inputs.forEach { session.removeInput($0) }
-        session.outputs.forEach { session.removeOutput($0) }
-        
-        // Add device input
-        guard let input = try? AVCaptureDeviceInput(device: device) else {
-            error = .configurationFailed
-            return
-        }
-        
-        guard session.canAddInput(input) else {
-            error = .configurationFailed
-            return
-        }
-        session.addInput(input)
-        currentDevice = device
-        
-        // Configure video output for frame processing
-        let videoOutput = AVCaptureVideoDataOutput()
-        videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
-        videoOutput.alwaysDiscardsLateVideoFrames = true
-        videoOutput.videoSettings = [
-            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-        ]
-        
-        guard session.canAddOutput(videoOutput) else {
-            error = .configurationFailed
-            return
-        }
-        session.addOutput(videoOutput)
-        self.videoOutput = videoOutput
-        
-        // Configure photo output for high-res capture
-        let photoOutput = AVCapturePhotoOutput()
-        
-        guard session.canAddOutput(photoOutput) else {
-            error = .configurationFailed
-            return
-        }
-        session.addOutput(photoOutput)
-        self.photoOutput = photoOutput
-        
-        // Set session preset for high quality
-        if session.canSetSessionPreset(.photo) {
-            session.sessionPreset = .photo
-        }
-        
-        // Apply default zoom factor
-        setZoom(zoomFactor)
     }
 }
 

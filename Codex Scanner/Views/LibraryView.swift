@@ -193,17 +193,7 @@ struct LibraryView: View {
             }
         }
         .listStyle(.sidebar)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    createNewBook()
-                } label: {
-                    Label("New Book", systemImage: "plus")
-                }
-                .help("Create New Book")
-            }
-        }
-        .navigationTitle("Library")
+        .toolbar(removing: .sidebarToggle)
         .onChange(of: newlySavedBookId) { _, newId in
             if let bookId = newId {
                 animateNewBook(bookId)
@@ -292,14 +282,14 @@ struct LibraryView: View {
                     } label: {
                         Label("Rename", systemImage: "pencil")
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.notionBorderless)
                     
                     Button {
                         exportPDF(book: book)
                     } label: {
                         Label("Export PDF", systemImage: "square.and.arrow.up")
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.notionSecondary)
                     .disabled(book.pages.isEmpty)
                 }
             }
@@ -353,6 +343,7 @@ struct LibraryView: View {
                 Button("Cancel") {
                     showingRenameSheet = false
                 }
+                .buttonStyle(.notionBorderless)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
@@ -361,6 +352,7 @@ struct LibraryView: View {
                     }
                     showingRenameSheet = false
                 }
+                .buttonStyle(.notionPrimary)
                 .disabled(newTitle.isEmpty)
             }
         }

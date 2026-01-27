@@ -29,5 +29,7 @@ struct Codex_ScannerApp: App {
             ContentView()
         }
         .modelContainer(sharedModelContainer)
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 900, height: 650)
     }
 }

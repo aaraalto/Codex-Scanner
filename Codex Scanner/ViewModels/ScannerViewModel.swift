@@ -49,6 +49,7 @@ final class ScannerViewModel: ObservableObject {
     @Published var lastCapturedPageId: UUID?  // For highlighting newly added page
     @Published var isCameraReady = false  // Camera initialized but not scanning
     @Published var isOnCooldown = false  // Prevents rapid captures
+    @Published var zoomFactor: CGFloat = 1.0
     
     // Book scanning features
     @Published var isBoundsLocked = false  // Lock the scanning area
@@ -173,6 +174,18 @@ final class ScannerViewModel: ObservableObject {
         } else {
             lockBounds()
         }
+    }
+    
+    /// Set absolute zoom level
+    func setZoom(_ factor: CGFloat) {
+        cameraManager.setZoom(factor)
+    }
+    
+    /// Adjust zoom by a delta (for scroll wheel)
+    func adjustZoom(delta: CGFloat) {
+        let current = zoomFactor
+        let newZoom = current + delta
+        cameraManager.setZoom(newZoom)
     }
     
     /// Set scan orientation and optionally apply default bounds
@@ -425,6 +438,11 @@ final class ScannerViewModel: ObservableObject {
                 self?.errorMessage = message
             }
             .store(in: &cancellables)
+            
+        // Sync zoom factor
+        cameraManager.$zoomFactor
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$zoomFactor)
         
         // Process video frames for document detection
         cameraManager.framePublisher

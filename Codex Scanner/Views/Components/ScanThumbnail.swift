@@ -23,12 +23,34 @@ struct ScanThumbnail: View {
     @State private var isDragging = false
     @State private var showDeleteHint = false
     
-    // Design constants - compact
+    // MARK: - Design Constants
+    
+    // Thumbnail dimensions
     private let thumbnailWidth: CGFloat = 80
     private let thumbnailHeight: CGFloat = 104
     private let cornerRadius: CGFloat = 6
+    
+    // Overlay sizing
+    private let overlayPadding: CGFloat = 2  // Makes overlay slightly larger than thumbnail
+    private let borderWidthNormal: CGFloat = 1
+    private let borderWidthHover: CGFloat = 2
+    private let shadowRadius: CGFloat = 4
+    private let shadowOffsetY: CGFloat = 2
+    private let shadowOpacity: Double = 0.1
+    
+    // Delete hint bubble sizing
+    private let deleteHintHorizontalPadding: CGFloat = 8
+    private let deleteHintVerticalPadding: CGFloat = 4
+    private let deleteHintOffsetY: CGFloat = -40
+    private let deleteHintScale: CGFloat = 0.85
+    
+    // Delete button sizing
+    private let deleteButtonScale: CGFloat = 0.9
+    
+    // Animation & interaction
     private let dissolveDuration: Double = 0.6
     private let deleteThreshold: CGFloat = -60
+    private let hoverAnimation = Animation.easeOut(duration: 0.1)
     
     init(
         image: NSImage?,
@@ -70,7 +92,7 @@ struct ScanThumbnail: View {
                 .foregroundStyle(.tertiary)
                 .opacity(isDissolving ? 1.0 - dissolveProgress : 1.0)
         }
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+        // No scale or lift - just border interaction
         .onHover { hovering in
             guard !isDissolving && !isDragging else { return }
             isHovered = hovering
@@ -79,12 +101,13 @@ struct ScanThumbnail: View {
             guard !isDissolving && !isDragging else { return }
             onTap?()
         }
+        .contentShape(Rectangle())
         .overlay(alignment: .top) {
             if showDeleteHint {
                 deleteHintBubble
-                    .offset(y: -40)
+                    .offset(y: deleteHintOffsetY)
                     .transition(.asymmetric(
-                        insertion: .scale(scale: 0.85).combined(with: .opacity),
+                        insertion: .scale(scale: deleteHintScale).combined(with: .opacity),
                         removal: .opacity.animation(.easeOut(duration: 0.12))
                     ))
             }
@@ -96,10 +119,22 @@ struct ScanThumbnail: View {
     private var deleteHintBubble: some View {
         Label("Release to delete", systemImage: "trash")
             .font(.caption2)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, deleteHintHorizontalPadding)
+            .padding(.vertical, deleteHintVerticalPadding)
             .background(.red, in: Capsule())
             .foregroundStyle(.white)
+    }
+    
+    // MARK: - Overlay Computed Properties
+    
+    private var borderWidth: CGFloat {
+        isHovered && !isDissolving && !isDragging ? borderWidthHover : borderWidthNormal
+    }
+    
+    private var borderColor: Color {
+        isHovered && !isDissolving && !isDragging 
+            ? Color.white.opacity(0.6) 
+            : Color.primary.opacity(0.08)
     }
     
     // MARK: - Computed Properties for Drag
@@ -186,29 +221,39 @@ struct ScanThumbnail: View {
                     }
             }
             
-            // Hover overlay with delete button
+            // Delete button (centered on thumbnail)
             if isHovered && !isDissolving && !isDragging {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .transition(.opacity)
-                
                 Button(action: deleteWithEffect) {
                     Label("Delete", systemImage: "trash")
                         .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.notionSecondary)
                 .tint(.red)
                 .controlSize(.small)
-                .transition(.scale(scale: 0.9).combined(with: .opacity))
+                .transition(.scale(scale: deleteButtonScale).combined(with: .opacity))
             }
         }
+        .frame(width: thumbnailWidth, height: thumbnailHeight)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .background(alignment: .center) {
+            // Hover overlay extends beyond thumbnail bounds
+            if isHovered && !isDissolving && !isDragging {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .frame(
+                        width: thumbnailWidth + (overlayPadding * 2),
+                        height: thumbnailHeight + (overlayPadding * 2)
+                    )
+                    .transition(.opacity)
+            }
+        }
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(borderColor, lineWidth: borderWidth)
                 .opacity(isDissolving ? 1.0 - dissolveProgress : 1.0)
         )
-        .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+        .animation(hoverAnimation, value: isHovered)
+        .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowOffsetY)
     }
     
     // MARK: - Deletion Effects

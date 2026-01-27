@@ -189,18 +189,10 @@ struct DocumentBoundsOverlay: View {
         )
         
         return HStack(spacing: 10) {
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.white.opacity(0.2))
-                    
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.white)
-                        .frame(width: geo.size.width * stabilityProgress)
-                }
-            }
-            .frame(width: 80, height: 6)
+            // Standard Mac slider
+            Slider(value: .constant(stabilityProgress), in: 0...1)
+                .frame(width: 80)
+                .disabled(true)
             
             // Percentage
             Text("\(Int(stabilityProgress * 100))%")

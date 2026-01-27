@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import AppKit
+import Foundation
 
 /// Scanner mode - either capturing or reviewing
 enum ScannerMode: String, CaseIterable {
@@ -38,6 +39,10 @@ struct ScannerView: View {
     @State private var savedBookPageCount: Int = 0
     @State private var savedBookId: UUID?
     
+    // UI visibility state (iOS Camera-style)
+    @State private var areControlsVisible = true
+    @State private var controlsHideTimer: Timer?
+    
     // Callback to navigate to library with newly saved book ID
     var onNavigateToLibrary: (() -> Void)?
     var onBookSaved: ((UUID) -> Void)?
@@ -49,7 +54,7 @@ struct ScannerView: View {
             backgroundGradient
             
             VStack(spacing: 0) {
-                // Refined toolbar
+                // Minimal toolbar - always visible
                 toolbarView
                 
                 // Main content - swaps between camera and preview
@@ -69,6 +74,14 @@ struct ScannerView: View {
                         }
                     }
                 )
+                .onChange(of: viewModel.capturedPages.count) { _, newCount in
+                    // Auto-switch to scanning mode if all pages are deleted
+                    if newCount == 0 && currentMode == .preview {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            currentMode = .scanning
+                        }
+                    }
+                }
             }
         }
         .task {
@@ -76,6 +89,7 @@ struct ScannerView: View {
         }
         .onDisappear {
             viewModel.stopScanning()
+            controlsHideTimer?.invalidate()
         }
         .alert("Error", isPresented: .init(
             get: { viewModel.errorMessage != nil },
@@ -123,79 +137,84 @@ struct ScannerView: View {
     // MARK: - Toolbar
     
     private var toolbarView: some View {
-        HStack(spacing: 8) {
-            // Left: Navigation buttons
-            HStack(spacing: 4) {
-                Button {
-                    onNavigateToLibrary?()
-                } label: {
-                    Label("Library", systemImage: "sidebar.left")
-                }
-                .buttonStyle(.borderless)
-                .help("Library")
-                
-                Button {
-                    startNewScan()
-                } label: {
-                    Label("New", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .help("New Scan")
-                
-                Button {
-                    undoLastScan()
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                }
-                .buttonStyle(.borderless)
-                .disabled(viewModel.capturedPages.isEmpty)
-                .help("Undo Last")
-            }
-            
-            Divider()
-                .frame(height: 16)
-            
-            // Book title - editable
+        HStack(spacing: 12) {
+            // Undo button - larger touch target
             Button {
-                showingTitleEditor = true
+                undoLastScan()
             } label: {
-                Text(bookTitle)
-                    .fontWeight(.medium)
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 32, height: 32)
             }
             .buttonStyle(.borderless)
-            
-            Spacer()
-            
-            // Center: Mode picker
-            Picker("Mode", selection: $currentMode) {
-                Label("Scan", systemImage: "viewfinder").tag(ScannerMode.scanning)
-                Label("Preview", systemImage: "eye").tag(ScannerMode.preview)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 180)
-            .disabled(viewModel.capturedPages.isEmpty && currentMode == .scanning)
-            
-            Spacer()
-            
-            // Right: Camera + Done
-            HStack(spacing: 12) {
-                // Camera selector
-                CameraSelector(
-                    availableDevices: viewModel.cameraManager.availableDevices,
-                    currentDevice: viewModel.cameraManager.currentDevice,
-                    isConnected: viewModel.cameraManager.isRunning,
-                    onSelectDevice: { device in
-                        Task { await viewModel.cameraManager.switchDevice(to: device) }
-                    }
-                )
-                
-                // Done button
-                Button("Done") {
-                    finishAndSave()
+            .disabled(viewModel.capturedPages.isEmpty)
+            .opacity(viewModel.capturedPages.isEmpty ? 0.3 : 1)
+            .help("Undo Last Page")
+
+            // Book title (only when pages exist)
+            if !viewModel.capturedPages.isEmpty {
+                Button {
+                    showingTitleEditor = true
+                } label: {
+                    Text(bookTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.capturedPages.isEmpty)
+                .buttonStyle(.borderless)
+                .help("Edit Book Title")
             }
+
+            Spacer()
+
+            // Save button (only when pages exist) - larger and more prominent
+            if !viewModel.capturedPages.isEmpty {
+                Button {
+                    finishAndSave()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Save")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.notionPrimary)
+                .help("Save \(viewModel.capturedPages.count) page\(viewModel.capturedPages.count == 1 ? "" : "s")")
+            }
+
+            // Options menu - larger touch target
+            Menu {
+                Button {
+                    showingTitleEditor = true
+                } label: {
+                    Label("Set Book Title", systemImage: "text.book.closed")
+                }
+
+                Divider()
+
+                Menu {
+                    ForEach(viewModel.cameraManager.availableDevices, id: \.uniqueID) { device in
+                        Button {
+                            Task { await viewModel.cameraManager.switchDevice(to: device) }
+                        } label: {
+                            HStack {
+                                Text(device.localizedName)
+                                if device.uniqueID == viewModel.cameraManager.currentDevice?.uniqueID {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Camera", systemImage: "camera")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .help("Options")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -207,7 +226,7 @@ struct ScannerView: View {
     @ViewBuilder
     private var mainContentView: some View {
         ZStack {
-            if currentMode == .scanning {
+            if currentMode == .scanning || viewModel.capturedPages.isEmpty {
                 scannerContent
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.98)),
@@ -228,9 +247,15 @@ struct ScannerView: View {
     
     private var scannerContent: some View {
         ZStack {
-            // Camera preview - fills container
-            CameraPreview(session: viewModel.cameraManager.session)
-                .ignoresSafeArea()
+            // Camera preview - fills container with digital zoom
+            CameraPreview(
+                session: viewModel.cameraManager.session,
+                zoomFactor: viewModel.zoomFactor,
+                onZoomChange: { delta in
+                    viewModel.adjustZoom(delta: delta)
+                }
+            )
+            .ignoresSafeArea()
             
             // Document bounds overlay with mask and draggable corners
             GeometryReader { geometry in
@@ -246,18 +271,42 @@ struct ScannerView: View {
                 )
             }
             
-            // Minimal floating controls
+            // Minimal floating controls - iOS Camera-style hide/show
             VStack {
                 Spacer()
                 
                 HStack(alignment: .bottom) {
                     // Left: Scan mode controls (minimal vertical stack)
                     scanControlsPanel
+                        .opacity(areControlsVisible ? 1 : 0)
+                        .scaleEffect(areControlsVisible ? 1 : 0.9)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                        .onHover { hovering in
+                            if hovering {
+                                showControls()
+                            }
+                        }
                     
                     Spacer()
                     
-                    // Center bottom: Record controls
-                    scannerBottomBar
+                    VStack(spacing: 16) {
+                        // Zoom controls
+                        zoomControls
+                            .opacity(areControlsVisible ? 1 : 0)
+                            .scaleEffect(areControlsVisible ? 1 : 0.95)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                        
+                        // Center bottom: Record controls - always visible but subtle when hidden
+                        scannerBottomBar
+                            .opacity(areControlsVisible ? 1 : 0.7)
+                            .scaleEffect(areControlsVisible ? 1 : 0.95)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                            .onHover { hovering in
+                                if hovering {
+                                    showControls()
+                                }
+                            }
+                    }
                     
                     Spacer()
                     
@@ -269,22 +318,26 @@ struct ScannerView: View {
                             }
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 40, height: 40)
+                                .frame(width: 48, height: 48)
                                 .background(
-                                    Circle()
-                                        .fill(Color.black.opacity(0.5))
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.notionSurface.opacity(0.9))
                                         .overlay(
-                                            Circle()
-                                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
                                         )
                                 )
+                                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
                         }
                         .buttonStyle(.plain)
                         .help("Reset Bounds")
+                        .opacity(areControlsVisible ? 1 : 0)
+                        .scaleEffect(areControlsVisible ? 1 : 0.9)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
                     } else {
-                        Color.clear.frame(width: 40, height: 40)
+                        Color.clear.frame(width: 48, height: 48)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -302,58 +355,139 @@ struct ScannerView: View {
         }
     }
     
+    // MARK: - Zoom Controls
+    
+    private var zoomControls: some View {
+        Group {
+            if viewModel.cameraManager.maxZoomFactor > 1.0 {
+                HStack(spacing: 12) {
+                    ForEach([1.0, 2.0], id: \.self) { factor in
+                        if factor <= Double(viewModel.cameraManager.maxZoomFactor) {
+                            Button {
+                                viewModel.setZoom(CGFloat(factor))
+                                showControls()
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.black.opacity(0.55))
+                                        .frame(width: 48, height: 48)
+                                        .overlay(
+                                            Circle()
+                                                .strokeBorder(isZoomSelected(factor) ? Color.yellow.opacity(0.6) : Color.white.opacity(0.25), lineWidth: 1.5)
+                                        )
+
+                                    Text(String(format: "%g×", factor))
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(isZoomSelected(factor) ? Color.yellow : Color.white)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        }
+                    }
+
+                    // Show current if not one of the presets
+                    if !isPresetZoom(viewModel.zoomFactor) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.black.opacity(0.55))
+                                .frame(width: 48, height: 48)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Color.yellow.opacity(0.6), lineWidth: 1.5)
+                                )
+
+                            Text(String(format: "%.1f×", viewModel.zoomFactor))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.yellow)
+                        }
+                        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func isZoomSelected(_ factor: Double) -> Bool {
+        abs(Double(viewModel.zoomFactor) - factor) < 0.1
+    }
+    
+    private func isPresetZoom(_ factor: CGFloat) -> Bool {
+        abs(Double(factor) - 1.0) < 0.1 || abs(Double(factor) - 2.0) < 0.1
+    }
+
     // MARK: - Scanner Bottom Bar
     
     private var scannerBottomBar: some View {
-        HStack(spacing: 12) {
-            Button {
+        Button {
+            showControls() // Keep controls visible on interaction
+            if viewModel.isAutoScanEnabled {
                 viewModel.togglePlayPause()
-            } label: {
-                Label(
-                    viewModel.scanningState == .scanning ? "Pause" : "Record",
-                    systemImage: viewModel.scanningState == .scanning ? "pause.fill" : "record.circle"
-                )
+            } else {
+                viewModel.capturePhoto()
             }
-            .buttonStyle(.bordered)
-            .tint(viewModel.scanningState == .scanning ? .orange : .red)
-            .controlSize(.large)
-            .disabled(!viewModel.isCameraReady || viewModel.isOnCooldown)
-            
-            if !viewModel.isAutoScanEnabled {
-                Button {
-                    viewModel.capturePhoto()
-                } label: {
-                    Label("Capture", systemImage: "camera.fill")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(!viewModel.isCameraReady || viewModel.isOnCooldown)
+        } label: {
+            ZStack {
+                // Outer white ring - larger for better touch target
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 4)
+                    .frame(width: 84, height: 84)
+
+                // Inner red circle (standard record button)
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning ? 58 : 68,
+                           height: viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning ? 58 : 68)
+                    .overlay(
+                        // White square for pause state (when recording)
+                        Group {
+                            if viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning {
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color.white)
+                                    .frame(width: 22, height: 22)
+                            }
+                        }
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
             }
         }
-        .padding(12)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(radius: 8, y: 4)
+        .buttonStyle(.plain)
+        .disabled(!viewModel.isCameraReady || viewModel.isOnCooldown)
+        .opacity((!viewModel.isCameraReady || viewModel.isOnCooldown) ? 0.5 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.scanningState)
     }
     
     // MARK: - Scan Controls Panel
     
     private var scanControlsPanel: some View {
-        VStack(spacing: 6) {
+        HStack(spacing: 12) {
+            // Lock toggle - larger and clearer
             Toggle(isOn: $viewModel.isBoundsLocked) {
-                Label("Lock", systemImage: viewModel.isBoundsLocked ? "lock.fill" : "lock.open")
+                Image(systemName: viewModel.isBoundsLocked ? "lock.fill" : "lock.open")
             }
-            .toggleStyle(.button)
+            .toggleStyle(.solid(size: .regular))
             .help(viewModel.isBoundsLocked ? "Unlock Area" : "Lock Area")
-            
+            .onChange(of: viewModel.isBoundsLocked) { _, _ in showControls() }
+
+            // Auto toggle - larger and clearer
             Toggle(isOn: $viewModel.isAutoScanEnabled) {
-                Label("Auto", systemImage: viewModel.isAutoScanEnabled ? "bolt.fill" : "bolt.slash")
+                Image(systemName: viewModel.isAutoScanEnabled ? "bolt.fill" : "bolt.slash")
             }
-            .toggleStyle(.button)
-            .help(viewModel.isAutoScanEnabled ? "Switch to Manual" : "Switch to Auto")
+            .toggleStyle(.solid(size: .regular))
+            .help(viewModel.isAutoScanEnabled ? "Manual Mode" : "Auto Mode")
+            .onChange(of: viewModel.isAutoScanEnabled) { _, _ in showControls() }
         }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .shadow(radius: 8, y: 4)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.notionSurface.opacity(0.85))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
     }
     
     // MARK: - Preview Content (Integrated, not modal)
@@ -496,62 +630,42 @@ struct ScannerView: View {
     // MARK: - Preview Controls Bar
     
     private var previewControlsBar: some View {
-        HStack(spacing: 16) {
-            // Page navigation
-            HStack(spacing: 8) {
+        HStack(spacing: 20) {
+            // Page navigation - larger buttons
+            HStack(spacing: 12) {
                 Button {
                     previewPageIndex = max(0, previewPageIndex - 1)
                 } label: {
-                    Label("Previous", systemImage: "chevron.left")
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
                 .disabled(previewPageIndex == 0)
-                
-                Text("Page \(previewPageIndex + 1) of \(viewModel.capturedPages.count)")
+                .opacity(previewPageIndex == 0 ? 0.3 : 0.7)
+
+                Text("\(previewPageIndex + 1) / \(viewModel.capturedPages.count)")
                     .monospacedDigit()
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.secondary)
-                
+                    .frame(minWidth: 60)
+
                 Button {
                     previewPageIndex = min(viewModel.capturedPages.count - 1, previewPageIndex + 1)
                 } label: {
-                    Label("Next", systemImage: "chevron.right")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
                 .disabled(previewPageIndex >= viewModel.capturedPages.count - 1)
+                .opacity(previewPageIndex >= viewModel.capturedPages.count - 1 ? 0.3 : 0.7)
             }
-            .disabled(viewModel.capturedPages.isEmpty)
-            
-            Divider()
-                .frame(height: 16)
-            
-            // Zoom controls
-            HStack(spacing: 4) {
-                Button {
-                    previewZoom = max(0.25, previewZoom - 0.25)
-                } label: {
-                    Label("Zoom Out", systemImage: "minus.magnifyingglass")
-                }
-                .buttonStyle(.borderless)
-                .disabled(previewZoom <= 0.25)
-                
-                Text("\(Int(previewZoom * 100))%")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 45)
-                
-                Button {
-                    previewZoom = min(4.0, previewZoom + 0.25)
-                } label: {
-                    Label("Zoom In", systemImage: "plus.magnifyingglass")
-                }
-                .buttonStyle(.borderless)
-                .disabled(previewZoom >= 4.0)
-            }
-            
+
             Spacer()
-            
-            // Actions
-            HStack(spacing: 8) {
+
+            // Actions - larger buttons
+            HStack(spacing: 12) {
                 Button(role: .destructive) {
                     if previewPageIndex < viewModel.capturedPages.count {
                         let page = viewModel.capturedPages[previewPageIndex]
@@ -564,21 +678,31 @@ struct ScannerView: View {
                         }
                     }
                 } label: {
-                    Label("Delete", systemImage: "trash")
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
                 .disabled(viewModel.capturedPages.isEmpty)
-                
+                .opacity(viewModel.capturedPages.isEmpty ? 0.3 : 0.7)
+                .help("Delete Page")
+
+                // Done button - prominent
                 Button {
                     currentMode = .scanning
                 } label: {
-                    Text("Continue Scanning")
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Done")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.notionPrimary)
+                .help("Continue Scanning")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
         .background(.bar)
     }
     
@@ -613,11 +737,13 @@ struct ScannerView: View {
                 Button("Cancel") {
                     showingTitleEditor = false
                 }
+                .buttonStyle(.notionBorderless)
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     showingTitleEditor = false
                 }
+                .buttonStyle(.notionPrimary)
             }
         }
     }
@@ -676,12 +802,12 @@ struct ScannerView: View {
             
             HStack {
                 TextField("New Book Title", text: $newBookTitle)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.notion)
                 
                 Button("Create & Save") {
                     createBookAndSave()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.notionPrimary)
                 .disabled(newBookTitle.isEmpty)
             }
             
@@ -736,6 +862,32 @@ struct ScannerView: View {
         modelContext.insert(book)
         newBookTitle = ""
         saveToBook(book)
+    }
+    
+    // MARK: - Control Visibility Management
+    
+    private func showControls() {
+        withAnimation(.easeIn(duration: 0.25)) {
+            areControlsVisible = true
+        }
+        
+        // Reset hide timer
+        controlsHideTimer?.invalidate()
+        controlsHideTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+            Task { @MainActor in
+                hideControls()
+            }
+        }
+    }
+    
+    private func hideControls() {
+        // Keep controls visible during active scanning or when pages exist
+        guard viewModel.scanningState != .scanning,
+              viewModel.capturedPages.isEmpty else { return }
+        
+        withAnimation(.easeOut(duration: 0.3)) {
+            areControlsVisible = false
+        }
     }
 }
 

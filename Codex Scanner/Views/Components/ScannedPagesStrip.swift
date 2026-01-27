@@ -21,7 +21,7 @@ struct ScannedPagesStrip: View {
     @State private var previousPageCount: Int = 0
     
     // Design constants - adjusted for larger higher-res thumbnails
-    private let stripHeight: CGFloat = 240
+    private let stripHeight: CGFloat = 180
     private let horizontalPadding: CGFloat = 24
     private let thumbnailSpacing: CGFloat = 16
     private let emptySlotCount: Int = 3
