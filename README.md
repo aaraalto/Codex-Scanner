@@ -20,10 +20,6 @@ A modern, native macOS document scanner app built with SwiftUI. Designed for sca
 - **SwiftData Persistence** - Modern data persistence with SwiftData
 - **Beautiful UI** - Clean, Notion-inspired design language
 
-## Screenshots
-
-<!-- Add screenshots here -->
-
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
