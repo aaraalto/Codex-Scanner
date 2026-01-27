@@ -8,7 +8,8 @@
 import SwiftUI
 import AppKit
 
-/// Document preview before committing to a book
+/// Document preview with native macOS Tahoe styling before committing to a book
+/// NOTE: This is now primarily used as a fallback - main preview is integrated into ScannerView
 struct PreviewView: View {
     @ObservedObject var viewModel: ScannerViewModel
     @Binding var isPresented: Bool
@@ -26,7 +27,7 @@ struct PreviewView: View {
             HSplitView {
                 // Page thumbnails
                 thumbnailSidebar
-                    .frame(minWidth: 140, maxWidth: 180)
+                    .frame(minWidth: 150, maxWidth: 200)
                 
                 // Selected page preview
                 pagePreview
@@ -37,7 +38,7 @@ struct PreviewView: View {
             // Footer with actions
             footer
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 950, minHeight: 650)
         .background(Color(nsColor: .windowBackgroundColor))
     }
     
@@ -45,47 +46,70 @@ struct PreviewView: View {
     
     private var header: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("Document Preview")
-                    .font(.headline)
-                Text("\(viewModel.capturedPages.count) pages")
-                    .font(.caption)
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
+                Text("\(viewModel.capturedPages.count) \(viewModel.capturedPages.count == 1 ? "page" : "pages")")
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
             }
             
             Spacer()
             
             // Zoom controls
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Button {
-                    zoomLevel = max(0.25, zoomLevel - 0.25)
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = max(0.25, zoomLevel - 0.25)
+                    }
                 } label: {
                     Image(systemName: "minus.magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
+                .disabled(zoomLevel <= 0.25)
                 
                 Text("\(Int(zoomLevel * 100))%")
-                    .font(.caption)
-                    .frame(width: 50)
+                    .font(.system(.caption, design: .monospaced, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 52)
                 
                 Button {
-                    zoomLevel = min(4.0, zoomLevel + 0.25)
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = min(4.0, zoomLevel + 0.25)
+                    }
                 } label: {
                     Image(systemName: "plus.magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionBorderless)
+                .disabled(zoomLevel >= 4.0)
+                
+                Divider()
+                    .frame(height: 18)
                 
                 Button {
-                    zoomLevel = 1.0
+                    withAnimation(.spring(response: 0.25)) {
+                        zoomLevel = 1.0
+                    }
                 } label: {
                     Text("Fit")
-                        .font(.caption)
+                        .font(.system(.caption, design: .rounded, weight: .semibold))
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.notionSecondary)
+                .controlSize(.small)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.notionSurface.opacity(0.8))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
+            )
+            .shadow(color: .black.opacity(0.15), radius: 1, y: 0.5)
             
             Button {
                 isPresented = false
@@ -95,15 +119,17 @@ struct PreviewView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Close Preview")
         }
-        .padding()
+        .padding(18)
+        .background(.regularMaterial)
     }
     
     // MARK: - Thumbnail Sidebar
     
     private var thumbnailSidebar: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 10) {
                 ForEach(Array(viewModel.capturedPages.enumerated()), id: \.element.id) { index, page in
                     PreviewThumbnail(
                         page: page,
@@ -111,19 +137,23 @@ struct PreviewView: View {
                         isSelected: index == selectedPageIndex
                     )
                     .onTapGesture {
-                        selectedPageIndex = index
+                        withAnimation(.spring(response: 0.3)) {
+                            selectedPageIndex = index
+                        }
                     }
                     .contextMenu {
-                        Button("Delete Page", role: .destructive) {
+                        Button(role: .destructive) {
                             viewModel.removePage(page)
                             if selectedPageIndex >= viewModel.capturedPages.count {
                                 selectedPageIndex = max(0, viewModel.capturedPages.count - 1)
                             }
+                        } label: {
+                            Label("Delete Page", systemImage: "trash")
                         }
                     }
                 }
             }
-            .padding()
+            .padding(16)
         }
         .background(Color(nsColor: .controlBackgroundColor))
     }
@@ -141,18 +171,25 @@ struct PreviewView: View {
             } else if selectedPageIndex < viewModel.capturedPages.count {
                 let page = viewModel.capturedPages[selectedPageIndex]
                 
-                ScrollView([.horizontal, .vertical]) {
+                ScrollView([.horizontal, .vertical], showsIndicators: false) {
                     if let image = page.displayImage {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
                             .scaleEffect(zoomLevel)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(28)
                     } else {
                         ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
-                .background(Color(nsColor: .textBackgroundColor))
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(16)
             }
         }
     }
@@ -164,21 +201,32 @@ struct PreviewView: View {
             // Page navigation
             HStack(spacing: 16) {
                 Button {
-                    selectedPageIndex = max(0, selectedPageIndex - 1)
+                    withAnimation(.spring(response: 0.3)) {
+                        selectedPageIndex = max(0, selectedPageIndex - 1)
+                    }
                 } label: {
                     Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(.notionSecondary)
                 .disabled(selectedPageIndex == 0)
                 
                 Text("Page \(selectedPageIndex + 1) of \(viewModel.capturedPages.count)")
-                    .font(.caption)
+                    .font(.system(.body, design: .rounded, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 140)
                 
                 Button {
-                    selectedPageIndex = min(viewModel.capturedPages.count - 1, selectedPageIndex + 1)
+                    withAnimation(.spring(response: 0.3)) {
+                        selectedPageIndex = min(viewModel.capturedPages.count - 1, selectedPageIndex + 1)
+                    }
                 } label: {
                     Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(.notionSecondary)
                 .disabled(selectedPageIndex >= viewModel.capturedPages.count - 1)
             }
             .disabled(viewModel.capturedPages.isEmpty)
@@ -186,62 +234,23 @@ struct PreviewView: View {
             Spacer()
             
             // Actions
-            HStack(spacing: 12) {
-                Button("Clear All", role: .destructive) {
+            HStack(spacing: 14) {
+                Button(role: .destructive) {
                     viewModel.clearAllPages()
                     isPresented = false
+                } label: {
+                    Text("Clear All")
                 }
                 .disabled(viewModel.capturedPages.isEmpty)
                 
                 Button("Continue Scanning") {
                     isPresented = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.notionPrimary)
             }
         }
-        .padding()
-    }
-}
-
-// MARK: - Preview Thumbnail
-
-struct PreviewThumbnail: View {
-    let page: ScannerViewModel.CapturedPage
-    let pageNumber: Int
-    let isSelected: Bool
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            if let thumbnail = page.thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .shadow(color: .black.opacity(0.2), radius: isSelected ? 4 : 2)
-            } else {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(.quaternary)
-                    .frame(height: 100)
-                    .overlay {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                    }
-            }
-            
-            Text("\(pageNumber)")
-                .font(.caption2)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-        }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-        )
+        .padding(18)
+        .background(.regularMaterial)
     }
 }
 

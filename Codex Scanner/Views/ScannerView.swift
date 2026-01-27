@@ -9,42 +9,87 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import AppKit
+import Foundation
+
+/// Scanner mode - either capturing or reviewing
+enum ScannerMode: String, CaseIterable {
+    case scanning
+    case preview
+}
 
 /// Main scanning view with camera preview and controls
+/// Features sleek macOS Tahoe design with integrated preview mode
 struct ScannerView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = ScannerViewModel()
     @State private var showingBookPicker = false
-    @State private var showingPreview = false
+    @State private var showingTitleEditor = false
     @State private var newBookTitle = ""
+    @State private var currentMode: ScannerMode = .scanning
+    @State private var bookTitle: String = "Untitled Book"
+    @State private var previewPageIndex: Int = 0
+    @State private var previewZoom: Double = 1.0
     @Query(sort: \Book.createdAt, order: .reverse) private var books: [Book]
     
-    // Design constants
-    private let accentGradient = LinearGradient(
-        colors: [Color(hex: "4F46E5"), Color(hex: "7C3AED")],
-        startPoint: .leading,
-        endPoint: .trailing
-    )
+    // Save confirmation state
+    @State private var showingSaveConfirmation = false
+    @State private var savedBookCover: NSImage?
+    @State private var savedBookTitle: String = ""
+    @State private var savedBookPageCount: Int = 0
+    @State private var savedBookId: UUID?
+    
+    // UI visibility state (iOS Camera-style)
+    @State private var areControlsVisible = true
+    @State private var controlsHideTimer: Timer?
+    
+    // Callback to navigate to library with newly saved book ID
+    var onNavigateToLibrary: (() -> Void)?
+    var onBookSaved: ((UUID) -> Void)?
+    var onBookArrived: (() -> Void)?
     
     var body: some View {
-        HSplitView {
-            // Camera preview area
-            cameraSection
-                .frame(minWidth: 550)
+        ZStack {
+            // Background
+            backgroundGradient
             
-            // Captured pages strip
-            capturedPagesSection
-                .frame(minWidth: 220, maxWidth: 320)
-        }
-        .background(Color(hex: "0F0F14"))
-        .toolbar {
-            toolbarContent
+            VStack(spacing: 0) {
+                // Minimal toolbar - always visible
+                toolbarView
+                
+                // Main content - swaps between camera and preview
+                mainContentView
+                
+                // Bottom thumbnail strip
+                ScannedPagesStrip(
+                    pages: viewModel.capturedPages,
+                    coverImage: nil,
+                    onDeletePage: { page in viewModel.removePage(page) },
+                    onTapPage: { page in
+                        if let index = viewModel.capturedPages.firstIndex(where: { $0.id == page.id }) {
+                            previewPageIndex = index
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                currentMode = .preview
+                            }
+                        }
+                    }
+                )
+                .onChange(of: viewModel.capturedPages.count) { _, newCount in
+                    // Auto-switch to scanning mode if all pages are deleted
+                    if newCount == 0 && currentMode == .preview {
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                            currentMode = .scanning
+                        }
+                    }
+                }
+            }
         }
         .task {
-            await viewModel.startScanning()
+            await viewModel.initializeCamera()
         }
         .onDisappear {
             viewModel.stopScanning()
+            controlsHideTimer?.invalidate()
         }
         .alert("Error", isPresented: .init(
             get: { viewModel.errorMessage != nil },
@@ -57,472 +102,755 @@ struct ScannerView: View {
         .sheet(isPresented: $showingBookPicker) {
             bookPickerSheet
         }
-        .sheet(isPresented: $showingPreview) {
-            PreviewView(viewModel: viewModel, isPresented: $showingPreview)
+        .sheet(isPresented: $showingTitleEditor) {
+            titleEditorSheet
         }
-    }
-    
-    // MARK: - Camera Section
-    
-    private var cameraSection: some View {
-        ZStack {
-            // Dark background
-            Color(hex: "0F0F14")
-            
-            // Camera preview with rounded corners
-            CameraPreview(session: viewModel.cameraManager.session)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-                )
-                .padding(16)
-            
-            // Document bounds overlay
-            GeometryReader { geometry in
-                DocumentBoundsOverlay(
-                    bounds: viewModel.currentBounds,
-                    viewSize: CGSize(
-                        width: geometry.size.width - 32,
-                        height: geometry.size.height - 32
-                    ),
-                    stabilityProgress: viewModel.stabilityProgress,
-                    isScanning: viewModel.scanningState == .scanning
-                )
-                .offset(x: 16, y: 16)
-            }
-            
-            // Processing indicator
-            if viewModel.isProcessing {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                        .tint(.white)
-                    Text("Processing...")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.8))
-                }
-                .padding(24)
-                .background(.ultraThinMaterial.opacity(0.9), in: RoundedRectangle(cornerRadius: 16))
-            }
-            
-            // Capture success overlay
-            if viewModel.showCaptureSuccess {
-                CaptureSuccessOverlay(pageNumber: viewModel.capturedPages.count)
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.8).combined(with: .opacity),
-                        removal: .opacity
-                    ))
-            }
-            
-            // Bottom controls
-            VStack {
-                // Top status bar
-                statusBar
-                    .padding(.top, 24)
-                    .padding(.horizontal, 24)
-                
-                Spacer()
-                
-                // Bottom control panel
-                controlPanel
-                    .padding(.bottom, 24)
-                    .padding(.horizontal, 24)
-            }
-        }
-    }
-    
-    // MARK: - Status Bar
-    
-    private var statusBar: some View {
-        HStack {
-            // Scanning state indicator
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(viewModel.scanningState.color)
-                    .frame(width: 10, height: 10)
-                    .shadow(color: viewModel.scanningState.color.opacity(0.5), radius: 4)
-                
-                Text(viewModel.scanningState.rawValue)
-                    .font(.system(.caption, design: .monospaced, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(.black.opacity(0.5), in: Capsule())
-            
-            Spacer()
-            
-            // Auto-scan indicator
-            if viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption2)
-                    Text("Auto")
-                        .font(.caption2.weight(.medium))
-                }
-                .foregroundStyle(.yellow)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.black.opacity(0.5), in: Capsule())
-            }
-            
-            // Page counter
-            if !viewModel.capturedPages.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.fill")
-                        .font(.caption2)
-                    Text("\(viewModel.capturedPages.count)")
-                        .font(.system(.caption, design: .monospaced, weight: .bold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(accentGradient, in: Capsule())
-            }
-        }
-    }
-    
-    // MARK: - Control Panel
-    
-    private var controlPanel: some View {
-        HStack(spacing: 0) {
-            // Left controls
-            HStack(spacing: 16) {
-                // Stop button
-                ControlButton(
-                    icon: "stop.fill",
-                    label: "Stop",
-                    isActive: viewModel.scanningState == .stopped,
-                    color: .red
-                ) {
-                    viewModel.stopScanning()
-                }
-                
-                // Play/Pause button
-                ControlButton(
-                    icon: viewModel.scanningState == .scanning ? "pause.fill" : "play.fill",
-                    label: viewModel.scanningState == .scanning ? "Pause" : "Play",
-                    isActive: viewModel.scanningState != .stopped,
-                    color: viewModel.scanningState == .scanning ? .orange : .green
-                ) {
-                    if viewModel.scanningState == .stopped {
-                        Task { await viewModel.startScanning() }
-                    } else {
-                        viewModel.togglePlayPause()
+        .overlay {
+            if showingSaveConfirmation {
+                BookSaveConfirmationOverlay(
+                    coverImage: savedBookCover,
+                    bookTitle: savedBookTitle,
+                    pageCount: savedBookPageCount,
+                    onBookArrived: {
+                        onBookArrived?()
+                    },
+                    onComplete: {
+                        showingSaveConfirmation = false
+                        if let bookId = savedBookId {
+                            onBookSaved?(bookId)
+                        }
+                        onNavigateToLibrary?()
                     }
-                }
+                )
+                .transition(.opacity)
             }
-            
-            Spacer()
-            
-            // Center - Capture button
-            captureButton
-            
-            Spacer()
-            
-            // Right controls
-            HStack(spacing: 16) {
-                // Auto-scan toggle
-                ControlButton(
-                    icon: "bolt.fill",
-                    label: "Auto",
-                    isActive: viewModel.isAutoScanEnabled,
-                    color: .yellow
-                ) {
-                    viewModel.isAutoScanEnabled.toggle()
+        }
+    }
+    
+    // MARK: - Background
+    
+    private var backgroundGradient: some View {
+        Color(nsColor: .windowBackgroundColor)
+            .ignoresSafeArea()
+    }
+    
+    // MARK: - Toolbar
+    
+    private var toolbarView: some View {
+        HStack(spacing: 12) {
+            // Undo button - larger touch target
+            Button {
+                undoLastScan()
+            } label: {
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .disabled(viewModel.capturedPages.isEmpty)
+            .opacity(viewModel.capturedPages.isEmpty ? 0.3 : 1)
+            .help("Undo Last Page")
+
+            // Book title (only when pages exist)
+            if !viewModel.capturedPages.isEmpty {
+                Button {
+                    showingTitleEditor = true
+                } label: {
+                    Text(bookTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                 }
-                
-                // Filter preset
+                .buttonStyle(.borderless)
+                .help("Edit Book Title")
+            }
+
+            Spacer()
+
+            // Save button (only when pages exist) - larger and more prominent
+            if !viewModel.capturedPages.isEmpty {
+                Button {
+                    finishAndSave()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                        Text("Save")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.notionPrimary)
+                .help("Save \(viewModel.capturedPages.count) page\(viewModel.capturedPages.count == 1 ? "" : "s")")
+            }
+
+            // Options menu - larger touch target
+            Menu {
+                Button {
+                    showingTitleEditor = true
+                } label: {
+                    Label("Set Book Title", systemImage: "text.book.closed")
+                }
+
+                Divider()
+
                 Menu {
-                    ForEach(ImageProcessor.FilterPreset.allCases) { preset in
+                    ForEach(viewModel.cameraManager.availableDevices, id: \.uniqueID) { device in
                         Button {
-                            viewModel.selectedPreset = preset
+                            Task { await viewModel.cameraManager.switchDevice(to: device) }
                         } label: {
                             HStack {
-                                Text(preset.rawValue)
-                                if viewModel.selectedPreset == preset {
+                                Text(device.localizedName)
+                                if device.uniqueID == viewModel.cameraManager.currentDevice?.uniqueID {
                                     Image(systemName: "checkmark")
                                 }
                             }
                         }
                     }
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "camera.filters")
-                            .font(.system(size: 18))
-                        Text("Filter")
-                            .font(.system(size: 9, weight: .medium))
-                    }
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 52, height: 52)
-                    .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    Label("Camera", systemImage: "camera")
                 }
-                .menuStyle(.borderlessButton)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 32, height: 32)
             }
+            .buttonStyle(.borderless)
+            .help("Options")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.ultraThinMaterial.opacity(0.8))
-                .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
-        )
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
     
-    // MARK: - Capture Button
+    // MARK: - Main Content
     
-    private var captureButton: some View {
-        Button(action: { viewModel.capturePhoto() }) {
-            ZStack {
-                // Outer ring
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.white.opacity(0.8), .white.opacity(0.4)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 4
-                    )
-                    .frame(width: 72, height: 72)
-                
-                // Inner circle
-                Circle()
-                    .fill(.white)
-                    .frame(width: 58, height: 58)
-                
-                // Stability progress ring
-                if viewModel.stabilityProgress > 0 {
-                    Circle()
-                        .trim(from: 0, to: viewModel.stabilityProgress)
-                        .stroke(
-                            accentGradient,
-                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                        )
-                        .frame(width: 72, height: 72)
-                        .rotationEffect(.degrees(-90))
+    @ViewBuilder
+    private var mainContentView: some View {
+        ZStack {
+            if currentMode == .scanning || viewModel.capturedPages.isEmpty {
+                scannerContent
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.98)),
+                        removal: .opacity
+                    ))
+            } else {
+                previewContent
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 1.02)),
+                        removal: .opacity
+                    ))
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: currentMode)
+    }
+    
+    // MARK: - Scanner Content
+    
+    private var scannerContent: some View {
+        ZStack {
+            // Camera preview - fills container with digital zoom
+            CameraPreview(
+                session: viewModel.cameraManager.session,
+                zoomFactor: viewModel.zoomFactor,
+                onZoomChange: { delta in
+                    viewModel.adjustZoom(delta: delta)
                 }
+            )
+            .ignoresSafeArea()
+            
+            // Document bounds overlay with mask and draggable corners
+            GeometryReader { geometry in
+                DocumentBoundsOverlay(
+                    bounds: viewModel.displayBounds,
+                    viewSize: geometry.size,
+                    stabilityProgress: viewModel.stabilityProgress,
+                    isScanning: viewModel.scanningState == .scanning,
+                    statusText: statusText,
+                    onCornerDrag: { corner, point in
+                        viewModel.updateCorner(corner, to: point)
+                    }
+                )
+            }
+            
+            // Minimal floating controls - iOS Camera-style hide/show
+            VStack {
+                Spacer()
+                
+                HStack(alignment: .bottom) {
+                    // Left: Scan mode controls (minimal vertical stack)
+                    scanControlsPanel
+                        .opacity(areControlsVisible ? 1 : 0)
+                        .scaleEffect(areControlsVisible ? 1 : 0.9)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                        .onHover { hovering in
+                            if hovering {
+                                showControls()
+                            }
+                        }
+                    
+                    Spacer()
+                    
+                    VStack(spacing: 16) {
+                        // Zoom controls
+                        zoomControls
+                            .opacity(areControlsVisible ? 1 : 0)
+                            .scaleEffect(areControlsVisible ? 1 : 0.95)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                        
+                        // Center bottom: Record controls - always visible but subtle when hidden
+                        scannerBottomBar
+                            .opacity(areControlsVisible ? 1 : 0.7)
+                            .scaleEffect(areControlsVisible ? 1 : 0.95)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                            .onHover { hovering in
+                                if hovering {
+                                    showControls()
+                                }
+                            }
+                    }
+                    
+                    Spacer()
+                    
+                    // Right: Reset button (if needed)
+                    if viewModel.manualBoundsAdjustment != nil && !viewModel.isBoundsLocked {
+                        Button {
+                            withAnimation(.spring(response: 0.3)) {
+                                viewModel.resetManualBounds()
+                            }
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 48, height: 48)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.notionSurface.opacity(0.9))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
+                                        )
+                                )
+                                .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reset Bounds")
+                        .opacity(areControlsVisible ? 1 : 0)
+                        .scaleEffect(areControlsVisible ? 1 : 0.9)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: areControlsVisible)
+                    } else {
+                        Color.clear.frame(width: 48, height: 48)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+            }
+            
+            // Capture success overlay - positioned in corner, non-blocking
+            if viewModel.showCaptureSuccess {
+                CaptureSuccessOverlay(
+                    pageNumber: viewModel.capturedPages.count,
+                    capturedImage: viewModel.capturedPages.last?.thumbnail ?? viewModel.capturedPages.last?.displayImage
+                )
+                .allowsHitTesting(false)
+            }
+        }
+    }
+    
+    // MARK: - Zoom Controls
+    
+    private var zoomControls: some View {
+        Group {
+            if viewModel.cameraManager.maxZoomFactor > 1.0 {
+                HStack(spacing: 12) {
+                    ForEach([1.0, 2.0], id: \.self) { factor in
+                        if factor <= Double(viewModel.cameraManager.maxZoomFactor) {
+                            Button {
+                                viewModel.setZoom(CGFloat(factor))
+                                showControls()
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.black.opacity(0.55))
+                                        .frame(width: 48, height: 48)
+                                        .overlay(
+                                            Circle()
+                                                .strokeBorder(isZoomSelected(factor) ? Color.yellow.opacity(0.6) : Color.white.opacity(0.25), lineWidth: 1.5)
+                                        )
+
+                                    Text(String(format: "%g×", factor))
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(isZoomSelected(factor) ? Color.yellow : Color.white)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        }
+                    }
+
+                    // Show current if not one of the presets
+                    if !isPresetZoom(viewModel.zoomFactor) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.black.opacity(0.55))
+                                .frame(width: 48, height: 48)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Color.yellow.opacity(0.6), lineWidth: 1.5)
+                                )
+
+                            Text(String(format: "%.1f×", viewModel.zoomFactor))
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.yellow)
+                        }
+                        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func isZoomSelected(_ factor: Double) -> Bool {
+        abs(Double(viewModel.zoomFactor) - factor) < 0.1
+    }
+    
+    private func isPresetZoom(_ factor: CGFloat) -> Bool {
+        abs(Double(factor) - 1.0) < 0.1 || abs(Double(factor) - 2.0) < 0.1
+    }
+
+    // MARK: - Scanner Bottom Bar
+    
+    private var scannerBottomBar: some View {
+        Button {
+            showControls() // Keep controls visible on interaction
+            if viewModel.isAutoScanEnabled {
+                viewModel.togglePlayPause()
+            } else {
+                viewModel.capturePhoto()
+            }
+        } label: {
+            ZStack {
+                // Outer white ring - larger for better touch target
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 4)
+                    .frame(width: 84, height: 84)
+
+                // Inner red circle (standard record button)
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning ? 58 : 68,
+                           height: viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning ? 58 : 68)
+                    .overlay(
+                        // White square for pause state (when recording)
+                        Group {
+                            if viewModel.isAutoScanEnabled && viewModel.scanningState == .scanning {
+                                RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color.white)
+                                    .frame(width: 22, height: 22)
+                            }
+                        }
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
             }
         }
         .buttonStyle(.plain)
-        .disabled(viewModel.scanningState == .stopped || !viewModel.cameraManager.isRunning)
-        .scaleEffect(viewModel.scanningState == .stopped ? 0.9 : 1.0)
-        .animation(.spring(response: 0.3), value: viewModel.scanningState)
+        .disabled(!viewModel.isCameraReady || viewModel.isOnCooldown)
+        .opacity((!viewModel.isCameraReady || viewModel.isOnCooldown) ? 0.5 : 1.0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.scanningState)
     }
     
-    // MARK: - Captured Pages Section
+    // MARK: - Scan Controls Panel
     
-    private var capturedPagesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Text("Scanned Pages")
-                    .font(.system(.headline, design: .rounded))
-                    .foregroundStyle(.white)
-                
-                Spacer()
-                
-                Text("\(viewModel.capturedPages.count)")
-                    .font(.system(.caption, design: .monospaced, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(accentGradient, in: Capsule())
+    private var scanControlsPanel: some View {
+        HStack(spacing: 12) {
+            // Lock toggle - larger and clearer
+            Toggle(isOn: $viewModel.isBoundsLocked) {
+                Image(systemName: viewModel.isBoundsLocked ? "lock.fill" : "lock.open")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            Divider()
-                .background(Color.white.opacity(0.1))
-            
-            // Pages list
-            if viewModel.capturedPages.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "doc.text.image")
-                        .font(.system(size: 40))
-                        .foregroundStyle(.white.opacity(0.3))
-                    Text("No pages yet")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.5))
-                    Text("Capture documents to see them here")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.3))
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            ForEach(Array(viewModel.capturedPages.enumerated()), id: \.element.id) { index, page in
-                                CapturedPageRow(
-                                    page: page,
-                                    pageNumber: index + 1,
-                                    isHighlighted: viewModel.lastCapturedPageId == page.id,
-                                    onDelete: { viewModel.removePage(page) }
-                                )
-                                .id(page.id)
-                                .transition(.asymmetric(
-                                    insertion: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.9)),
-                                    removal: .opacity
-                                ))
-                            }
-                        }
-                        .padding(12)
-                    }
-                    .onChange(of: viewModel.lastCapturedPageId) { _, newId in
-                        if let newId = newId {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                proxy.scrollTo(newId, anchor: .top)
-                            }
-                        }
-                    }
-                }
+            .toggleStyle(.solid(size: .regular))
+            .help(viewModel.isBoundsLocked ? "Unlock Area" : "Lock Area")
+            .onChange(of: viewModel.isBoundsLocked) { _, _ in showControls() }
+
+            // Auto toggle - larger and clearer
+            Toggle(isOn: $viewModel.isAutoScanEnabled) {
+                Image(systemName: viewModel.isAutoScanEnabled ? "bolt.fill" : "bolt.slash")
             }
-            
-            Divider()
-                .background(Color.white.opacity(0.1))
-            
-            // Action buttons
-            VStack(spacing: 10) {
-                // Preview button
-                Button {
-                    showingPreview = true
-                } label: {
-                    HStack {
-                        Image(systemName: "eye.fill")
-                        Text("Preview Document")
-                    }
-                    .font(.system(.subheadline, weight: .medium))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.capturedPages.isEmpty)
-                
-                // Save button
-                Button {
-                    showingBookPicker = true
-                } label: {
-                    HStack {
-                        Image(systemName: "square.and.arrow.down.fill")
-                        Text("Save to Book")
-                    }
-                    .font(.system(.subheadline, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(accentGradient, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .disabled(viewModel.capturedPages.isEmpty)
-            }
-            .padding(12)
+            .toggleStyle(.solid(size: .regular))
+            .help(viewModel.isAutoScanEnabled ? "Manual Mode" : "Auto Mode")
+            .onChange(of: viewModel.isAutoScanEnabled) { _, _ in showControls() }
         }
-        .background(Color(hex: "1A1A24"))
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.notionSurface.opacity(0.85))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.notionBorder.opacity(0.5), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
     }
     
-    // MARK: - Book Picker Sheet
+    // MARK: - Preview Content (Integrated, not modal)
     
-    private var bookPickerSheet: some View {
-        VStack(spacing: 20) {
-            Text("Save to Book")
-                .font(.headline)
-            
-            if books.isEmpty {
-                Text("No books yet. Create one below.")
-                    .foregroundStyle(.secondary)
-            } else {
-                List(books) { book in
-                    Button {
-                        saveToBook(book)
-                    } label: {
-                        HStack {
-                            Image(systemName: "book.closed.fill")
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading) {
-                                Text(book.title)
-                                Text("\(book.pageCount) pages")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
+    private var previewContent: some View {
+        VStack(spacing: 0) {
+            // Page preview area with bounds editing
+            GeometryReader { geometry in
+                ZStack {
+                    // Subtle background
+                    Color.primary.opacity(0.02)
+                    
+                    if viewModel.capturedPages.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "doc.text.image")
+                                .font(.system(size: 40, weight: .light))
+                                .foregroundStyle(.quaternary)
+                            Text("No pages yet")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.tertiary)
                         }
+                    } else if previewPageIndex < viewModel.capturedPages.count {
+                        let page = viewModel.capturedPages[previewPageIndex]
+                        
+                        // Main image with bounds overlay
+                        ZStack {
+                            // Original image (use originalImage to show full frame)
+                            if let originalImage = viewModel.imageProcessor.nsImage(from: page.originalImage) {
+                                Image(nsImage: originalImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .scaleEffect(previewZoom)
+                                    .overlay {
+                                        // Bounds overlay for editing
+                                        GeometryReader { imageGeometry in
+                                            PreviewBoundsOverlay(
+                                                bounds: page.bounds,
+                                                viewSize: imageGeometry.size,
+                                                zoom: previewZoom,
+                                                onCornerDrag: { corner, point in
+                                                    updatePreviewBounds(corner: corner, point: point, pageIndex: previewPageIndex)
+                                                }
+                                            )
+                                        }
+                                    }
+                            } else if let image = page.displayImage {
+                                Image(nsImage: image)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .scaleEffect(previewZoom)
+                            } else {
+                                ProgressView()
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+                        .padding(24)
                     }
-                    .buttonStyle(.plain)
                 }
-                .frame(height: 200)
             }
             
-            Divider()
-            
-            HStack {
-                TextField("New Book Title", text: $newBookTitle)
-                    .textFieldStyle(.roundedBorder)
-                
-                Button("Create & Save") {
-                    createBookAndSave()
-                }
-                .disabled(newBookTitle.isEmpty)
-            }
-            
-            Button("Cancel") {
-                showingBookPicker = false
-            }
+            // Preview controls bar
+            previewControlsBar
         }
-        .padding()
-        .frame(width: 400)
     }
     
-    // MARK: - Toolbar
+    // MARK: - Update Preview Bounds
     
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
-            Menu {
-                ForEach(viewModel.cameraManager.availableDevices, id: \.uniqueID) { device in
-                    Button {
-                        Task {
-                            await viewModel.cameraManager.switchDevice(to: device)
-                        }
-                    } label: {
-                        HStack {
-                            Text(device.localizedName)
-                            if device.uniqueID == viewModel.cameraManager.currentDevice?.uniqueID {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label("Camera", systemImage: "camera")
-            }
+    private func updatePreviewBounds(corner: ScannerViewModel.Corner, point: CGPoint, pageIndex: Int) {
+        guard pageIndex < viewModel.capturedPages.count else { return }
+        
+        var page = viewModel.capturedPages[pageIndex]
+        guard let currentBounds = page.bounds else { return }
+        
+        // Clamp to valid range
+        let clampedPoint = CGPoint(
+            x: max(0.02, min(0.98, point.x)),
+            y: max(0.02, min(0.98, point.y))
+        )
+        
+        // Create new bounds with the updated corner
+        let newBounds: ImageProcessor.DocumentBounds
+        switch corner {
+        case .topLeft:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: clampedPoint,
+                topRight: currentBounds.topRight,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .topRight:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: clampedPoint,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .bottomLeft:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: currentBounds.topRight,
+                bottomLeft: clampedPoint,
+                bottomRight: currentBounds.bottomRight,
+                confidence: currentBounds.confidence
+            )
+        case .bottomRight:
+            newBounds = ImageProcessor.DocumentBounds(
+                topLeft: currentBounds.topLeft,
+                topRight: currentBounds.topRight,
+                bottomLeft: currentBounds.bottomLeft,
+                bottomRight: clampedPoint,
+                confidence: currentBounds.confidence
+            )
         }
         
-        ToolbarItem(placement: .status) {
-            if let device = viewModel.cameraManager.currentDevice {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(viewModel.cameraManager.isRunning ? .green : .red)
-                        .frame(width: 8, height: 8)
-                    Text(device.localizedName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        // Update bounds and reprocess
+        page.bounds = newBounds
+        page.processedImage = viewModel.imageProcessor.process(
+            image: page.originalImage,
+            bounds: newBounds,
+            preset: page.preset,
+            enhance: true
+        )
+        page.thumbnail = viewModel.imageProcessor.createHighResThumbnail(
+            from: page.processedImage,
+            size: NSSize(width: 150, height: 200)
+        )
+        
+        viewModel.capturedPages[pageIndex] = page
+    }
+    
+    // MARK: - Preview Controls Bar
+    
+    private var previewControlsBar: some View {
+        HStack(spacing: 20) {
+            // Page navigation - larger buttons
+            HStack(spacing: 12) {
+                Button {
+                    previewPageIndex = max(0, previewPageIndex - 1)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(.notionBorderless)
+                .disabled(previewPageIndex == 0)
+                .opacity(previewPageIndex == 0 ? 0.3 : 0.7)
+
+                Text("\(previewPageIndex + 1) / \(viewModel.capturedPages.count)")
+                    .monospacedDigit()
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 60)
+
+                Button {
+                    previewPageIndex = min(viewModel.capturedPages.count - 1, previewPageIndex + 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.notionBorderless)
+                .disabled(previewPageIndex >= viewModel.capturedPages.count - 1)
+                .opacity(previewPageIndex >= viewModel.capturedPages.count - 1 ? 0.3 : 0.7)
+            }
+
+            Spacer()
+
+            // Actions - larger buttons
+            HStack(spacing: 12) {
+                Button(role: .destructive) {
+                    if previewPageIndex < viewModel.capturedPages.count {
+                        let page = viewModel.capturedPages[previewPageIndex]
+                        viewModel.removePage(page)
+                        if previewPageIndex >= viewModel.capturedPages.count {
+                            previewPageIndex = max(0, viewModel.capturedPages.count - 1)
+                        }
+                        if viewModel.capturedPages.isEmpty {
+                            currentMode = .scanning
+                        }
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.notionBorderless)
+                .disabled(viewModel.capturedPages.isEmpty)
+                .opacity(viewModel.capturedPages.isEmpty ? 0.3 : 0.7)
+                .help("Delete Page")
+
+                // Done button - prominent
+                Button {
+                    currentMode = .scanning
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Done")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                }
+                .buttonStyle(.notionPrimary)
+                .help("Continue Scanning")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+    
+    private var statusText: String {
+        if viewModel.isBoundsLocked {
+            return "Area Locked"
+        }
+        switch viewModel.scanningState {
+        case .scanning:
+            if viewModel.stabilityProgress > 0 {
+                return "Hold Steady…"
+            }
+            return "Detecting..."
+        case .paused:
+            return "Tap to Start"
+        case .stopped:
+            return "Camera Off"
+        }
+    }
+    
+    
+    // MARK: - Title Editor Sheet
+    
+    private var titleEditorSheet: some View {
+        Form {
+            TextField("Book Title", text: $bookTitle)
+        }
+        .formStyle(.grouped)
+        .frame(width: 300, height: 80)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    showingTitleEditor = false
+                }
+                .buttonStyle(.notionBorderless)
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    showingTitleEditor = false
+                }
+                .buttonStyle(.notionPrimary)
             }
         }
     }
     
     // MARK: - Actions
     
+    private func startNewScan() {
+        viewModel.clearAllPages()
+        viewModel.isBoundsLocked = false
+        viewModel.lockedBounds = nil
+        viewModel.manualBoundsAdjustment = nil
+        bookTitle = "Untitled Book"
+        currentMode = .scanning
+        previewPageIndex = 0
+    }
+    
+    private func undoLastScan() {
+        if let lastPage = viewModel.capturedPages.last {
+            viewModel.removePage(lastPage)
+        }
+    }
+    
+    private func finishAndSave() {
+        showingBookPicker = true
+    }
+    
+    // MARK: - Book Picker Sheet
+    
+    private var bookPickerSheet: some View {
+        VStack(spacing: 16) {
+            Text("Save to Book")
+                .font(.headline)
+            
+            if books.isEmpty {
+                Text("No books yet. Create one below.")
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 16)
+            } else {
+                List(books) { book in
+                    Button {
+                        saveToBook(book)
+                    } label: {
+                        HStack {
+                            Label(book.title, systemImage: "book.closed.fill")
+                            Spacer()
+                            Text("\(book.pageCount) pages")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(height: 180)
+            }
+            
+            Divider()
+            
+            HStack {
+                TextField("New Book Title", text: $newBookTitle)
+                    .textFieldStyle(.notion)
+                
+                Button("Create & Save") {
+                    createBookAndSave()
+                }
+                .buttonStyle(.notionPrimary)
+                .disabled(newBookTitle.isEmpty)
+            }
+            
+            Button("Cancel") {
+                showingBookPicker = false
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(20)
+        .frame(width: 400)
+    }
+    
+    // MARK: - Save Actions
+    
     private func saveToBook(_ book: Book) {
+        // Capture cover image before saving (capturedPages will be cleared)
+        let coverImage: NSImage?
+        if let firstPage = viewModel.capturedPages.first {
+            coverImage = firstPage.displayImage ?? firstPage.thumbnail
+        } else {
+            coverImage = nil
+        }
+        let pageCount = viewModel.capturedPages.count
+        let title = book.title
+        let bookId = book.id
+        
         Task {
             do {
                 try await viewModel.saveToBook(book, modelContext: modelContext)
                 showingBookPicker = false
+                
+                // Show save confirmation with animation
+                savedBookCover = coverImage
+                savedBookTitle = title
+                savedBookPageCount = pageCount
+                savedBookId = bookId
+                
+                // Trigger library icon pop animation
+                onBookArrived?()
+                
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    showingSaveConfirmation = true
+                }
             } catch {
                 viewModel.errorMessage = error.localizedDescription
             }
@@ -530,291 +858,345 @@ struct ScannerView: View {
     }
     
     private func createBookAndSave() {
-        let book = Book(title: newBookTitle)
+        let book = Book(title: newBookTitle.isEmpty ? bookTitle : newBookTitle)
         modelContext.insert(book)
         newBookTitle = ""
         saveToBook(book)
     }
-}
-
-// MARK: - Control Button
-
-struct ControlButton: View {
-    let icon: String
-    let label: String
-    let isActive: Bool
-    let color: Color
-    let action: () -> Void
     
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 18))
-                Text(label)
-                    .font(.system(size: 9, weight: .medium))
-            }
-            .foregroundStyle(isActive ? color : .white.opacity(0.5))
-            .frame(width: 52, height: 52)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(isActive ? color.opacity(0.2) : .white.opacity(0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(isActive ? color.opacity(0.5) : .clear, lineWidth: 1)
-            )
+    // MARK: - Control Visibility Management
+    
+    private func showControls() {
+        withAnimation(.easeIn(duration: 0.25)) {
+            areControlsVisible = true
         }
-        .buttonStyle(.plain)
+        
+        // Reset hide timer
+        controlsHideTimer?.invalidate()
+        controlsHideTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+            Task { @MainActor in
+                hideControls()
+            }
+        }
     }
-}
-
-// MARK: - Capture Success Overlay
-
-struct CaptureSuccessOverlay: View {
-    let pageNumber: Int
-    @State private var showCheckmark = false
-    @State private var showText = false
     
-    var body: some View {
-        VStack(spacing: 20) {
-            // Success checkmark with animation
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "10B981"), Color(hex: "059669")],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-                    .shadow(color: Color(hex: "10B981").opacity(0.5), radius: 20)
-                    .scaleEffect(showCheckmark ? 1 : 0.5)
-                    .opacity(showCheckmark ? 1 : 0)
-                
-                Image(systemName: "checkmark")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(.white)
-                    .scaleEffect(showCheckmark ? 1 : 0)
-            }
-            
-            VStack(spacing: 8) {
-                Text("Page \(pageNumber) Captured!")
-                    .font(.system(.title2, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white)
-                
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.turn.up.right")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("Turn the page")
-                        .font(.system(.subheadline, design: .rounded, weight: .medium))
-                }
-                .foregroundStyle(.white.opacity(0.8))
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.15), in: Capsule())
-            }
-            .opacity(showText ? 1 : 0)
-            .offset(y: showText ? 0 : 10)
-        }
-        .padding(40)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(.ultraThinMaterial.opacity(0.95))
-                .shadow(color: .black.opacity(0.3), radius: 30)
-        )
-        .onAppear {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
-                showCheckmark = true
-            }
-            withAnimation(.easeOut(duration: 0.4).delay(0.2)) {
-                showText = true
-            }
+    private func hideControls() {
+        // Keep controls visible during active scanning or when pages exist
+        guard viewModel.scanningState != .scanning,
+              viewModel.capturedPages.isEmpty else { return }
+        
+        withAnimation(.easeOut(duration: 0.3)) {
+            areControlsVisible = false
         }
     }
 }
 
-// MARK: - Captured Page Row
+// MARK: - Preview Bounds Overlay
 
-struct CapturedPageRow: View {
-    let page: ScannerViewModel.CapturedPage
-    let pageNumber: Int
-    var isHighlighted: Bool = false
-    let onDelete: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Page number
-            Text("\(pageNumber)")
-                .font(.system(.caption, design: .monospaced, weight: .bold))
-                .foregroundStyle(isHighlighted ? Color(hex: "10B981") : .white.opacity(0.5))
-                .frame(width: 24)
-            
-            // Thumbnail
-            if let thumbnail = page.thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 50, height: 65)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .shadow(color: isHighlighted ? Color(hex: "10B981").opacity(0.5) : .black.opacity(0.3), radius: isHighlighted ? 8 : 4)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(isHighlighted ? Color(hex: "10B981") : .clear, lineWidth: 2)
-                    )
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.1))
-                    .frame(width: 50, height: 65)
-                    .overlay {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                            .tint(.white)
-                    }
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(page.preset.rawValue)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.9))
-                
-                if let bounds = page.bounds {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.green)
-                        Text("\(Int(bounds.confidence * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                }
-            }
-            
-            Spacer()
-            
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.caption)
-                    .foregroundStyle(.red.opacity(0.8))
-                    .padding(8)
-                    .background(Color.red.opacity(0.1), in: Circle())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isHighlighted ? Color(hex: "10B981").opacity(0.15) : Color.white.opacity(0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isHighlighted ? Color(hex: "10B981").opacity(0.5) : .clear, lineWidth: 1)
-        )
-        .scaleEffect(isHighlighted ? 1.02 : 1.0)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHighlighted)
-    }
-}
-
-// MARK: - Document Bounds Overlay (Updated)
-
-struct DocumentBoundsOverlay: View {
+/// Overlay for editing document bounds in preview mode
+private struct PreviewBoundsOverlay: View {
     let bounds: ImageProcessor.DocumentBounds?
     let viewSize: CGSize
-    let stabilityProgress: Double
-    let isScanning: Bool
+    let zoom: Double
+    let onCornerDrag: (ScannerViewModel.Corner, CGPoint) -> Void
+    
+    @State private var isDragging = false
+    
+    private let cornerSize: CGFloat = 24
+    private let lineWidth: CGFloat = 2
     
     var body: some View {
         GeometryReader { geometry in
             if let bounds = bounds {
-                let size = viewSize
+                let size = geometry.size
                 
                 // Convert normalized coordinates to view coordinates
-                let topLeft = CGPoint(
-                    x: bounds.topLeft.x * size.width,
-                    y: (1 - bounds.topLeft.y) * size.height
-                )
-                let topRight = CGPoint(
-                    x: bounds.topRight.x * size.width,
-                    y: (1 - bounds.topRight.y) * size.height
-                )
-                let bottomLeft = CGPoint(
-                    x: bounds.bottomLeft.x * size.width,
-                    y: (1 - bounds.bottomLeft.y) * size.height
-                )
-                let bottomRight = CGPoint(
-                    x: bounds.bottomRight.x * size.width,
-                    y: (1 - bounds.bottomRight.y) * size.height
-                )
+                let topLeft = CGPoint(x: bounds.topLeft.x * size.width, y: (1 - bounds.topLeft.y) * size.height)
+                let topRight = CGPoint(x: bounds.topRight.x * size.width, y: (1 - bounds.topRight.y) * size.height)
+                let bottomLeft = CGPoint(x: bounds.bottomLeft.x * size.width, y: (1 - bounds.bottomLeft.y) * size.height)
+                let bottomRight = CGPoint(x: bounds.bottomRight.x * size.width, y: (1 - bounds.bottomRight.y) * size.height)
                 
-                // Document outline
-                Path { path in
-                    path.move(to: topLeft)
-                    path.addLine(to: topRight)
-                    path.addLine(to: bottomRight)
-                    path.addLine(to: bottomLeft)
-                    path.closeSubpath()
-                }
-                .stroke(
-                    isScanning ? Color(hex: "4F46E5") : Color.white.opacity(0.5),
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
-                )
-                .shadow(color: Color(hex: "4F46E5").opacity(isScanning ? 0.5 : 0), radius: 8)
-                
-                // Corner indicators
-                ForEach(Array([topLeft, topRight, bottomLeft, bottomRight].enumerated()), id: \.offset) { _, point in
-                    Circle()
-                        .fill(isScanning ? Color(hex: "4F46E5") : .white.opacity(0.8))
-                        .frame(width: 14, height: 14)
-                        .shadow(color: .black.opacity(0.3), radius: 4)
-                        .position(point)
-                }
-                
-                // Stability indicator
-                if stabilityProgress > 0 && isScanning {
-                    let center = CGPoint(
-                        x: (topLeft.x + topRight.x + bottomLeft.x + bottomRight.x) / 4,
-                        y: (topLeft.y + topRight.y + bottomLeft.y + bottomRight.y) / 4
-                    )
+                ZStack {
+                    // Dimmed overlay outside bounds
+                    Path { path in
+                        path.addRect(CGRect(origin: .zero, size: size))
+                        path.move(to: topLeft)
+                        path.addLine(to: topRight)
+                        path.addLine(to: bottomRight)
+                        path.addLine(to: bottomLeft)
+                        path.closeSubpath()
+                    }
+                    .fill(Color.black.opacity(0.4), style: FillStyle(eoFill: true))
                     
-                    Circle()
-                        .trim(from: 0, to: stabilityProgress)
-                        .stroke(Color(hex: "4F46E5"), style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 50, height: 50)
-                        .rotationEffect(.degrees(-90))
-                        .position(center)
-                        .shadow(color: Color(hex: "4F46E5").opacity(0.5), radius: 8)
+                    // Border lines
+                    Path { path in
+                        path.move(to: topLeft)
+                        path.addLine(to: topRight)
+                        path.addLine(to: bottomRight)
+                        path.addLine(to: bottomLeft)
+                        path.closeSubpath()
+                    }
+                    .stroke(Color.accentColor, lineWidth: lineWidth)
+                    
+                    // Draggable corner handles
+                    cornerHandle(at: topLeft, corner: .topLeft, size: size)
+                    cornerHandle(at: topRight, corner: .topRight, size: size)
+                    cornerHandle(at: bottomLeft, corner: .bottomLeft, size: size)
+                    cornerHandle(at: bottomRight, corner: .bottomRight, size: size)
                 }
             }
         }
+        .allowsHitTesting(true)
+    }
+    
+    @ViewBuilder
+    private func cornerHandle(at point: CGPoint, corner: ScannerViewModel.Corner, size: CGSize) -> some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: cornerSize, height: cornerSize)
+            .overlay(
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 2)
+            )
+            .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+            .position(point)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let newPoint = CGPoint(
+                            x: value.location.x / size.width,
+                            y: 1 - (value.location.y / size.height)
+                        )
+                        onCornerDrag(corner, newPoint)
+                    }
+            )
     }
 }
 
-// MARK: - Color Extension
+// MARK: - Flying Book Save Animation (Instagram-style)
 
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 3: // RGB (12-bit)
-            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
-            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
-            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (255, 0, 0, 0)
+/// Instagram-inspired "send" animation - book flies to library icon
+private struct BookSaveConfirmationOverlay: View {
+    let coverImage: NSImage?
+    let bookTitle: String
+    let pageCount: Int
+    let onBookArrived: () -> Void
+    let onComplete: () -> Void
+    
+    // Animation states
+    @State private var backdropOpacity: Double = 0
+    @State private var bookScale: CGFloat = 0.5
+    @State private var bookOpacity: Double = 0
+    @State private var bookPosition: CGPoint = .zero
+    @State private var bookRotation: Double = 0
+    @State private var checkmarkScale: CGFloat = 0
+    @State private var checkmarkOpacity: Double = 0
+    @State private var labelOpacity: Double = 0
+    @State private var labelOffset: CGFloat = 20
+    @State private var isFlying = false
+    @State private var trailPositions: [CGPoint] = []
+    
+    // Target position for the library icon (top-left of window, accounting for toolbar)
+    private let libraryIconTarget = CGPoint(x: 120, y: 52)
+    
+    var body: some View {
+        GeometryReader { geometry in
+            let centerPosition = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2 - 40)
+            
+            ZStack {
+                // Backdrop with blur
+                Color.black.opacity(backdropOpacity * 0.55)
+                    .ignoresSafeArea()
+                
+                // Motion trail (visible during flight)
+                if isFlying {
+                    ForEach(0..<6, id: \.self) { i in
+                        let progress = Double(i) / 6.0
+                        let trailPos = interpolatePosition(
+                            from: centerPosition,
+                            to: libraryIconTarget,
+                            progress: progress * 0.8
+                        )
+                        
+                        Circle()
+                            .fill(Color(hex: "34C759").opacity(0.4 - progress * 0.3))
+                            .frame(width: 12 - CGFloat(i) * 1.5, height: 12 - CGFloat(i) * 1.5)
+                            .position(trailPos)
+                            .blur(radius: CGFloat(i) * 0.5)
+                    }
+                }
+                
+                // Main book card
+                VStack(spacing: 0) {
+                    ZStack {
+                        // Book cover
+                        bookCover
+                            .frame(width: isFlying ? 40 : 150, height: isFlying ? 52 : 195)
+                        
+                        // Success checkmark badge
+                        if !isFlying {
+                            Circle()
+                                .fill(Color(hex: "34C759"))
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 18, weight: .bold))
+                                        .foregroundStyle(.white)
+                                )
+                                .shadow(color: Color(hex: "34C759").opacity(0.6), radius: 10, y: 3)
+                                .scaleEffect(checkmarkScale)
+                                .opacity(checkmarkOpacity)
+                                .offset(x: 65, y: -85)
+                        }
+                    }
+                    
+                    // Label below book (hidden during flight)
+                    if !isFlying {
+                        VStack(spacing: 5) {
+                            Text("Saved!")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                            
+                            Text("\(pageCount) \(pageCount == 1 ? "page" : "pages")")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.65))
+                        }
+                        .padding(.top, 18)
+                        .opacity(labelOpacity)
+                        .offset(y: labelOffset)
+                    }
+                }
+                .scaleEffect(bookScale)
+                .opacity(bookOpacity)
+                .position(isFlying ? bookPosition : centerPosition)
+                .rotation3DEffect(
+                    .degrees(bookRotation),
+                    axis: (x: 0.1, y: 1, z: 0.05),
+                    perspective: 0.4
+                )
+            }
         }
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
-        )
+        .onAppear {
+            runFlyingAnimation()
+        }
+    }
+    
+    private var bookCover: some View {
+        Group {
+            if let cover = coverImage {
+                Image(nsImage: cover)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipShape(RoundedRectangle(cornerRadius: isFlying ? 4 : 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: isFlying ? 4 : 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.25), lineWidth: isFlying ? 1 : 1.5)
+                    )
+                    .shadow(color: .black.opacity(isFlying ? 0.3 : 0.5), radius: isFlying ? 8 : 18, y: isFlying ? 3 : 8)
+            } else {
+                RoundedRectangle(cornerRadius: isFlying ? 4 : 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "5B8DEF"), Color(hex: "3D5A99")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        VStack(spacing: isFlying ? 2 : 8) {
+                            Image(systemName: "book.closed.fill")
+                                .font(.system(size: isFlying ? 12 : 36, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.9))
+                            if !isFlying {
+                                Text(bookTitle)
+                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 10)
+                            }
+                        }
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: isFlying ? 4 : 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(isFlying ? 0.3 : 0.5), radius: isFlying ? 8 : 18, y: isFlying ? 3 : 8)
+            }
+        }
+    }
+    
+    private func interpolatePosition(from: CGPoint, to: CGPoint, progress: Double) -> CGPoint {
+        // Curved path with easing
+        let curveHeight: CGFloat = -80 // Arc upward
+        let x = from.x + (to.x - from.x) * progress
+        let linearY = from.y + (to.y - from.y) * progress
+        let curveOffset = curveHeight * sin(progress * .pi) // Parabolic arc
+        return CGPoint(x: x, y: linearY + curveOffset)
+    }
+    
+    private func runFlyingAnimation() {
+        // Phase 1: Fade in backdrop and book with bounce
+        withAnimation(.easeOut(duration: 0.2)) {
+            backdropOpacity = 1.0
+            bookOpacity = 1.0
+        }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+            bookScale = 1.0
+        }
+        
+        // Phase 2: Pop in checkmark
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+                checkmarkScale = 1.0
+                checkmarkOpacity = 1.0
+            }
+            withAnimation(.easeOut(duration: 0.25)) {
+                labelOpacity = 1.0
+                labelOffset = 0
+            }
+        }
+        
+        // Phase 3: Brief pause, then fly to library icon!
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            // Hide label and checkmark
+            withAnimation(.easeIn(duration: 0.15)) {
+                labelOpacity = 0
+                checkmarkOpacity = 0
+            }
+            
+            // Start the flight
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isFlying = true
+                
+                // Animate position along curved path to library icon
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1.0, duration: 0.55)) {
+                    bookPosition = libraryIconTarget
+                    bookScale = 0.25
+                    bookRotation = -20
+                }
+                
+                // Fade backdrop
+                withAnimation(.easeOut(duration: 0.4)) {
+                    backdropOpacity = 0
+                }
+                
+                // Trigger library icon pop when book arrives
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    onBookArrived()
+                }
+                
+                // Fade out book as it "enters" the icon
+                withAnimation(.easeOut(duration: 0.2).delay(0.4)) {
+                    bookOpacity = 0
+                }
+            }
+        }
+        
+        // Phase 4: Complete transition
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            onComplete()
+        }
     }
 }
 
@@ -822,3 +1204,4 @@ extension Color {
     ScannerView()
         .modelContainer(for: [Book.self, Page.self], inMemory: true)
 }
+
