@@ -67,3 +67,6 @@ credentials.json
 # Profiling
 *.gcda
 *.gcno
+
+# Worktrees
+.worktrees/
