@@ -31,7 +31,12 @@ final class Book {
     var pageCount: Int {
         pages.count
     }
-    
+
+    /// The page used as the book's cover thumbnail (first page in reading order).
+    var coverPage: Page? {
+        sortedPages.first
+    }
+
     /// Returns true if the book was created within the last 24 hours
     var isNew: Bool {
         let twentyFourHoursAgo = Date().addingTimeInterval(-24 * 60 * 60)
