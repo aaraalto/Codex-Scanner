@@ -488,7 +488,12 @@ final class ScannerModel: ObservableObject {
         }
 
         let oriented = correctOrientation(ciImage)
-        let bounds = detectedBounds ?? (await imageProcessor.detectDocument(in: oriented))
+        let bounds: ImageProcessor.DocumentBounds?
+        if let detected = detectedBounds {
+            bounds = detected
+        } else {
+            bounds = await imageProcessor.detectDocument(in: oriented)
+        }
         let processed = imageProcessor.process(
             image: oriented,
             bounds: bounds,
