@@ -8,8 +8,9 @@
 import AppKit
 
 extension NSImage {
-    /// Resize the image to fit within the target size while maintaining aspect ratio
-    func resized(to targetSize: NSSize) -> NSImage {
+    /// Resize the image to fit within the target size while maintaining aspect ratio.
+    /// `nonisolated` because it runs inside the off-main image-processing pipeline.
+    nonisolated func resized(to targetSize: NSSize) -> NSImage {
         let aspectRatio = size.width / size.height
         var newSize = targetSize
         

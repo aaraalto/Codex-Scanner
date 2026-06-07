@@ -13,7 +13,10 @@ import Accelerate
 
 /// Handles ML-powered document detection, perspective correction, and advanced image enhancement
 /// Optimized for producing high-quality page scans suitable for Apple Books
-final class ImageProcessor: @unchecked Sendable {
+// Image processing is CPU-bound work meant to run off the main actor. The project
+// builds with SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, so this type is marked
+// `nonisolated` to opt its methods out of implicit main-actor isolation.
+nonisolated final class ImageProcessor: @unchecked Sendable {
     
     // MARK: - Types
     
@@ -82,7 +85,7 @@ final class ImageProcessor: @unchecked Sendable {
         }
     }
     
-    struct DocumentBounds: Sendable {
+    nonisolated struct DocumentBounds: Sendable {
         let topLeft: CGPoint
         let topRight: CGPoint
         let bottomLeft: CGPoint

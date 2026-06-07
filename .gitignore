@@ -70,3 +70,4 @@ credentials.json
 
 # Worktrees
 .worktrees/
+.superpowers/
