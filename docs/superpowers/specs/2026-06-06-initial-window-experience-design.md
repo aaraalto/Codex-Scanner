@@ -1,7 +1,7 @@
 # Codex Scanner — Initial Window Experience Redesign
 
 **Date:** 2026-06-06
-**Status:** Design (awaiting review)
+**Status:** Approved — ready for implementation planning
 **Supersedes:** the *UI structure* of `docs/plans/2026-03-06-reliability-rebuild.md` (camera-first `TabView`). Adopts that plan's `ScannerPhase` state-machine ViewModel and simplified camera components.
 
 ## Goal
@@ -114,12 +114,12 @@ LibraryHome (root)
 - No `Notion*`/`SolidToggle` custom styles remain; no red record button / yellow zoom / auto-hide. Chrome adapts to Light/Dark and the system accent.
 - Builds with 0 warnings / 0 errors; app launches without crash.
 
-## Open Questions (for review)
+## Resolved for v1
 
-1. **Drag-to-reorder pages** in `BookDetailView` — include in v1, or defer?
-2. **Editor scope** — keep it minimal (rotate + filter presets), or is there more you want here?
-3. **Cover thumbnail source** — always the first page, or let the user pick a cover later?
-4. **New Scan target** — always a fresh book, or can you start a scan that appends to an existing book from inside that book?
+1. **Drag-to-reorder pages** in `BookDetailView` — **deferred.** Pages stay ordered by `Page.order`; reorder UI comes later. The model already supports it, so it's cheap to add.
+2. **Editor scope** — **minimal:** rotate (left/right) + filter presets, matching the existing `EditorView` capabilities.
+3. **Cover thumbnail** — **always the first page.** User-pickable covers are out of scope for v1.
+4. **New Scan target** — **always starts a fresh capture session.** The new-vs-existing-book choice happens in the Save-to-Book flow, which already covers "append to an existing book." No separate "scan into this book" entry point in v1.
 
 ## Out of Scope (YAGNI for now)
 
