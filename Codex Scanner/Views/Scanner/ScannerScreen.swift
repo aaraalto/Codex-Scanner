@@ -9,6 +9,9 @@ import SwiftUI
 import SwiftData
 
 struct ScannerScreen: View {
+    /// Called after a successful save to return to the library root (pop the whole stack).
+    var onFinished: () -> Void
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = ScannerModel()
@@ -146,7 +149,7 @@ struct ScannerScreen: View {
                 try await model.saveToBook(book, modelContext: modelContext)
                 showSaveSheet = false
                 newBookTitle = "Untitled Book"
-                dismiss()
+                onFinished()
             } catch {
                 model.errorMessage = error.localizedDescription
             }

@@ -5,9 +5,8 @@
 //  Native macOS design-token foundation.
 //
 //  This is the single source of truth for color, spacing, radius, and type.
-//  It is intentionally additive: the legacy `Color.notion*` tokens and the
-//  hand-rolled `Notion*` control styles still exist so nothing breaks. Views
-//  are migrated onto these tokens incrementally.
+//  The whole UI is built on these tokens; the legacy `Color.notion*` tokens
+//  and hand-rolled `Notion*` control styles have been removed.
 //
 //  Design intent (see project memory `project-direction`):
 //   - Target a native macOS (Tahoe) look. Prefer system semantic colors so the
@@ -83,8 +82,8 @@ extension Color {
     //
     // Controls drawn on top of the live camera feed must stay legible regardless
     // of system appearance, so these are intentionally fixed (not appearance-
-    // adaptive). They centralize the white/black scrim values currently spread
-    // across ScannerView and DocumentBoundsOverlay.
+    // adaptive). They centralize the white/black scrim values used by the
+    // scanner chrome (DocumentFrameOverlay, CaptureControlsBar).
 
     /// Crisp edge for the document-bounds frame on top of video.
     static let scannerBorder = Color.white.opacity(0.9)

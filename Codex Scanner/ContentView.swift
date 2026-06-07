@@ -18,7 +18,7 @@ struct ContentView: View {
                     switch route {
                     case .book(let book): BookDetailView(book: book)
                     case .page(let page): PageEditorScreen(page: page)
-                    case .scan: ScannerScreen()
+                    case .scan: ScannerScreen(onFinished: { path.removeAll() })
                     }
                 }
         }
